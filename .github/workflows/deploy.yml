@@ -1,0 +1,21 @@
+# Cloud Run 自動デプロイ（main merge時）。
+# NOTE(Step4): 認証は完走優先で SAキー開始 → 緑になったら WIF 化（design）。
+# GCPプロジェクト確定後に有効化する。現状はプレースホルダ。
+name: Deploy
+
+on:
+  workflow_dispatch: {}
+  # push:
+  #   branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: false # TODO(Step4): GCP_PROJECT / 認証(SAキー→WIF) を設定したら有効化
+    steps:
+      - uses: actions/checkout@v4
+      # - uses: google-github-actions/auth@v2
+      #   with: { credentials_json: '${{ secrets.GCP_SA_KEY }}' }
+      # - uses: google-github-actions/setup-gcloud@v2
+      # - run: gcloud builds submit ... && gcloud run deploy ...
+      - run: echo "deploy placeholder"

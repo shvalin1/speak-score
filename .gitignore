@@ -1,0 +1,40 @@
+# --- AI orchestration ログ（秘密混入の保険・二重ガード） ---
+_ai/
+
+# --- Python / backend ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.mypy_cache/
+
+# --- Node / frontend ---
+node_modules/
+dist/
+.turbo/
+*.local
+
+# --- env / secrets ---
+.env
+.env.*
+!.env.example
+*-key.json
+service-account*.json
+
+# --- Terraform ---
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+
+# --- OS / editor ---
+.DS_Store
+*.swp
+.idea/
+.vscode/

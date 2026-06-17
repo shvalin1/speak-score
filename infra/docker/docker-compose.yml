@@ -1,0 +1,40 @@
+# ローカル開発: 本番(Cloud Run + Nginx)と同構図で同一オリジン化（CORS不要・§9）。
+#   docker compose -f infra/docker/docker-compose.yml up
+# 加藤はこれだけでフロント+バックが同一オリジンで立ち上がる（モックモードならbackend不要）。
+#
+# 制約（実機乖離・§9）: Cloud Tasks は同期HTTPに、署名URLはモック、Firebase Auth は
+# AUTH_DISABLED で代替。本物（OIDC/CORS/署名URL）は実GCPでDay0スパイクする。
+
+services:
+  backend:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    environment:
+      - AUTH_DISABLED=1        # ローカルは Firebase 検証を飛ばし dev uid
+      - PORT=8080
+      # 同期worker: enqueue は自分自身(localhost:8080)を叩く
+      - WORKER_URL=http://localhost:8080
+    expose:
+      - "8080"
+
+  frontend:
+    build:
+      context: ../..
+      dockerfile: frontend/Dockerfile
+    environment:
+      - BACKEND_URL=http://backend:8080   # nginx.conf の ${BACKEND_URL}
+    ports:
+      - "8080:8080"
+    depends_on:
+      - backend
+
+  # --- 任意: 本物に寄せたいとき有効化（Firestore / Firebase Auth エミュレータ） ---
+  # firestore-emulator:
+  #   image: google/cloud-sdk:emulators
+  #   command: gcloud emulators firestore start --host-port=0.0.0.0:8081
+  #   ports: ["8081:8081"]
+  # auth-emulator:
+  #   image: google/cloud-sdk:emulators
+  #   command: gcloud emulators firebase ... # firebase emulators:start
+  #   ports: ["9099:9099"]

@@ -1,0 +1,83 @@
+{
+  "overall_score": 74,
+  "dimensions": {
+    "content": {
+      "score": 80,
+      "comment": "学生時代の研究エピソードが具体的で説得力があります。一方で結論を述べる前に背景の説明が長く、要点が伝わるまでに時間がかかっています。",
+      "source": "llm"
+    },
+    "structure": {
+      "score": 68,
+      "comment": "PREP法の観点では結論（Point）が冒頭に来ておらず、聞き手が要点を掴みにくい構成です。最初に一文で結論を述べると改善します。",
+      "source": "llm"
+    },
+    "delivery": {
+      "score": 71,
+      "comment": "話速は適切な範囲ですが、フィラー語（「えー」「あのー」）がやや多く、無音も平均的です。",
+      "source": "computed"
+    },
+    "confidence": {
+      "score": 78,
+      "comment": "声量は安定しており自信が感じられます。ピッチの抑揚も十分で、単調さは見られません。",
+      "source": "computed"
+    }
+  },
+  "audio_metrics": {
+    "speech_rate_cpm": 412.0,
+    "filler_count": 9,
+    "filler_rate": 3.6,
+    "silence_ratio": 0.18,
+    "silence_segments": [
+      { "start": 12.4, "end": 13.1 },
+      { "start": 48.9, "end": 50.2 },
+      { "start": 95.3, "end": 96.0 }
+    ],
+    "pitch_mean": 142.5,
+    "pitch_std": 31.2,
+    "volume_mean": 0.061,
+    "volume_cv": 0.42,
+    "volume_timeline": [
+      { "t": 0.0, "value": 0.04 },
+      { "t": 5.0, "value": 0.07 },
+      { "t": 10.0, "value": 0.06 },
+      { "t": 15.0, "value": 0.05 },
+      { "t": 20.0, "value": 0.08 },
+      { "t": 25.0, "value": 0.06 },
+      { "t": 30.0, "value": 0.07 }
+    ],
+    "pitch_timeline": [
+      { "t": 0.0, "value": 138.0 },
+      { "t": 5.0, "value": 150.0 },
+      { "t": 10.0, "value": 145.0 },
+      { "t": 15.0, "value": 130.0 },
+      { "t": 20.0, "value": 160.0 },
+      { "t": 25.0, "value": 142.0 },
+      { "t": 30.0, "value": 148.0 }
+    ]
+  },
+  "transcript": {
+    "full_text": "本日はよろしくお願いします。えー、私は九州大学の石川と申します。学生時代に最も力を入れたことは、あのー、研究室での音声解析の研究です。具体的には、面接の動画から話し方を定量的に評価する仕組みを作りました。この経験を通じて、課題を技術で解決する力が身についたと考えています。",
+    "duration_sec": 32.0,
+    "segments": [
+      { "start": 0.0, "end": 3.2, "text": "本日はよろしくお願いします。", "speaker": null },
+      { "start": 3.2, "end": 9.5, "text": "えー、私は九州大学の石川と申します。", "speaker": null },
+      { "start": 9.5, "end": 18.0, "text": "学生時代に最も力を入れたことは、あのー、研究室での音声解析の研究です。", "speaker": null },
+      { "start": 18.0, "end": 26.4, "text": "具体的には、面接の動画から話し方を定量的に評価する仕組みを作りました。", "speaker": null },
+      { "start": 26.4, "end": 32.0, "text": "この経験を通じて、課題を技術で解決する力が身についたと考えています。", "speaker": null }
+    ],
+    "fillers": [
+      { "text": "えー", "start_char": 16, "end_char": 18 },
+      { "text": "あのー", "start_char": 52, "end_char": 55 }
+    ]
+  },
+  "strengths": [
+    "具体的なエピソード（音声解析の研究）を使えており説得力がある",
+    "声量が安定しており自信が伝わる",
+    "成果を定量的に説明できている"
+  ],
+  "improvements": [
+    "フィラー語（「えー」「あのー」）を減らす",
+    "結論から話す（PREP法）を意識し、冒頭で要点を一文で述べる",
+    "背景説明を短くまとめ、要点が早く伝わるようにする"
+  ]
+}
