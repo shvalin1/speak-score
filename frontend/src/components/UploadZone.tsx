@@ -4,7 +4,7 @@
 
 import { useRef, useState } from "react";
 
-const ACCEPTED = ["video/mp4", "video/quicktime", "video/webm", "audio/m4a", "audio/wav"];
+const ALLOWED_EXTENSIONS = ["mp4", "mov", "webm", "m4a", "wav"];
 const MAX_BYTES = 200 * 1024 * 1024; // 申告サイズ上限の目安（実効はサーバ側で担保）
 
 interface Props {
@@ -17,13 +17,14 @@ export function UploadZone({ onUpload, uploadPct }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
 
-  const validateAndUpload = (file: File) => {
-    if (file.type && !ACCEPTED.includes(file.type)) {
-      setError(`対応していない形式です: ${file.type}`);
+const validateAndUpload = (file: File) => {
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    if (!extension || !ALLOWED_EXTENSIONS.includes(extension)) {
+      setError(`対応していない形式です（.${extension}）`);
       return;
     }
     if (file.size > MAX_BYTES) {
-      setError("ファイルが大きすぎます。");
+      setError("ファイルが大きすぎます（最大200MB）。");
       return;
     }
     setError(null);
@@ -55,13 +56,16 @@ export function UploadZone({ onUpload, uploadPct }: Props) {
       }}
       onClick={() => inputRef.current?.click()}
     >
+      <div style={{ fontSize: "4rem", marginBottom: "2rem", textAlign: "center" }}>📥</div>
+
       <p>面接動画をドラッグ&ドロップ、またはクリックして選択</p>
-      <small>対応形式: mp4 / mov / webm / m4a / wav</small>
-      {error && <p className="error">{error}</p>}
+      <small>対応形式 : {ALLOWED_EXTENSIONS.join(" / ")} ( 最大200MB)</small>
+      {error && <p className="error">⚠️ {error}</p>}
+
       <input
         ref={inputRef}
         type="file"
-        accept={ACCEPTED.join(",")}
+        accept={ALLOWED_EXTENSIONS.map((ext) => `.${ext}`).join(",")}
         hidden
         onChange={(e) => {
           const file = e.target.files?.[0];
