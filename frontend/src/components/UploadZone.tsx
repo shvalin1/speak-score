@@ -3,6 +3,10 @@
 // TODO(加藤): D&Dの見た目・エラーメッセージ表示・対応形式の案内を作り込む。
 
 import { useRef, useState } from "react";
+import { UploadCloud } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { cn } from "@/lib/utils";
 
 const ALLOWED_EXTENSIONS = ["mp4", "mov", "webm", "m4a", "wav"];
 const MAX_BYTES = 200 * 1024 * 1024; // 申告サイズ上限の目安（実効はサーバ側で担保）
@@ -17,8 +21,8 @@ export function UploadZone({ onUpload, uploadPct }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
 
-const validateAndUpload = (file: File) => {
-    const extension = file.name.split('.').pop()?.toLowerCase();
+  const validateAndUpload = (file: File) => {
+    const extension = file.name.split(".").pop()?.toLowerCase();
     if (!extension || !ALLOWED_EXTENSIONS.includes(extension)) {
       setError(`対応していない形式です（.${extension}）`);
       return;
@@ -33,16 +37,21 @@ const validateAndUpload = (file: File) => {
 
   if (uploadPct !== null) {
     return (
-      <div className="upload-zone uploading">
-        <p>アップロード中… {uploadPct}%</p>
-        <progress value={uploadPct} max={100} />
+      <div className="rounded-xl border border-border bg-card p-12 text-center">
+        <p className="mb-4 text-sm text-muted-foreground">
+          アップロード中… {uploadPct}%
+        </p>
+        <Progress value={uploadPct} className="mx-auto max-w-xs" />
       </div>
     );
   }
 
   return (
     <div
-      className={`upload-zone${dragging ? " dragging" : ""}`}
+      className={cn(
+        "flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-border bg-card p-12 text-center transition-colors cursor-pointer",
+        dragging && "border-primary bg-accent",
+      )}
       onDragOver={(e) => {
         e.preventDefault();
         setDragging(true);
@@ -56,11 +65,18 @@ const validateAndUpload = (file: File) => {
       }}
       onClick={() => inputRef.current?.click()}
     >
-      <div style={{ fontSize: "4rem", marginBottom: "2rem", textAlign: "center" }}>📥</div>
+      <UploadCloud className="size-12 text-muted-foreground" />
 
-      <p>面接動画をドラッグ&ドロップ、またはクリックして選択</p>
-      <small>対応形式 : {ALLOWED_EXTENSIONS.join(" / ")} ( 最大200MB)</small>
-      {error && <p className="error">⚠️ {error}</p>}
+      <p className="text-sm">面接動画をドラッグ&ドロップ、またはクリックして選択</p>
+      <p className="text-xs text-muted-foreground">
+        対応形式: {ALLOWED_EXTENSIONS.join(" / ")}（最大200MB）
+      </p>
+
+      <Button type="button" size="sm" onClick={() => inputRef.current?.click()}>
+        ファイルを選択
+      </Button>
+
+      {error && <p className="text-sm text-destructive">⚠️ {error}</p>}
 
       <input
         ref={inputRef}
