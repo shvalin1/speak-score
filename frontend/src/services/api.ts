@@ -166,7 +166,11 @@ async function mockGetInterview(jobId: string): Promise<InterviewJob> {
       result: sampleResult as unknown as AnalysisResult,
     };
   }
-  const stage = STAGE_TIMELINE.find((s) => elapsed < s.until)?.stage ?? "evaluating";
+  // 注意: STAGE_TIMELINE[0].stage は意図的に null（待機中）。
+  // `?? "evaluating"` だと null も「該当なし」と誤判定するため、見つからなかった場合のみ
+  // フォールバックするように分けている。
+  const match = STAGE_TIMELINE.find((s) => elapsed < s.until);
+  const stage = match ? match.stage : "evaluating";
   return {
     job_id: jobId,
     status: "processing",
