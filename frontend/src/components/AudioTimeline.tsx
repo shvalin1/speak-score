@@ -10,6 +10,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { AudioMetrics } from "../types/interview";
 
 export function AudioTimeline({ metrics }: { metrics: AudioMetrics }) {
@@ -20,19 +21,23 @@ export function AudioTimeline({ metrics }: { metrics: AudioMetrics }) {
   const data = [...byT.values()].sort((a, b) => a.t - b.t);
 
   return (
-    <div className="audio-timeline">
-      <h3>声の時系列（音量・ピッチ）</h3>
-      <ResponsiveContainer width="100%" height={240}>
-        <LineChart data={data}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="t" unit="s" />
-          <YAxis yAxisId="vol" orientation="left" />
-          <YAxis yAxisId="pitch" orientation="right" />
-          <Tooltip />
-          <Line yAxisId="vol" type="monotone" dataKey="volume" stroke="#3b82f6" dot={false} name="音量" />
-          <Line yAxisId="pitch" type="monotone" dataKey="pitch" stroke="#f59e0b" dot={false} name="ピッチ" />
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
+    <Card>
+      <CardHeader>
+        <CardTitle>声の時系列（音量・ピッチ）</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ResponsiveContainer width="100%" height={240}>
+          <LineChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="t" unit="s" />
+            <YAxis yAxisId="vol" orientation="left" />
+            <YAxis yAxisId="pitch" orientation="right" />
+            <Tooltip />
+            <Line yAxisId="vol" type="monotone" dataKey="volume" stroke="#3b82f6" dot={false} name="音量" />
+            <Line yAxisId="pitch" type="monotone" dataKey="pitch" stroke="#f59e0b" dot={false} name="ピッチ" />
+          </LineChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
   );
 }
