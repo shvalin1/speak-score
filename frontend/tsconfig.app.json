@@ -7,7 +7,10 @@
     "types": ["vite/client"],
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "paths": { "@shared/*": ["../shared/*"] },
+    "paths": {
+      "@shared/*": ["../shared/*"],
+      "@/*": ["./src/*"]
+    },
 
     /* Bundler mode */
     "moduleResolution": "bundler",
