@@ -2,19 +2,27 @@
 // view は idle → processing → result/error を job の status から導出する。
 // 設計根拠: design_review_and_frontback.md §6.2, §6.3
 
-import { useState } from "react";
-import { uploadInterview } from "./services/api";
+import { useEffect, useState } from "react";
+import { listInterviews, uploadInterview } from "./services/api";
 import { useInterviewJob } from "./hooks/useInterviewJob";
 import { AuthGate } from "./components/AuthGate";
 import { UploadZone } from "./components/UploadZone";
 import { AnalysisProgress } from "./components/AnalysisProgress";
 import { Dashboard } from "./components/Dashboard";
+import { HistoryList } from "./components/HistoryList";
+import type { InterviewSummary } from "./types/interview";
 import "./App.css";
 
 export default function App() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [uploadPct, setUploadPct] = useState<number | null>(null);
+  const [history, setHistory] = useState<InterviewSummary[]>([]);
   const { job } = useInterviewJob(jobId);
+
+  // 履歴一覧は初回表示時、および job のステータスが変わるたび（完了時など）に取り直す。
+  useEffect(() => {
+    listInterviews().then(setHistory).catch(() => {});
+  }, [job?.status]);
 
   const handleUpload = async (file: File) => {
     setUploadPct(0);
@@ -39,7 +47,12 @@ export default function App() {
       </header>
 
       <main className="app-main">
-        {!jobId && <UploadZone onUpload={handleUpload} uploadPct={uploadPct} />}
+        {!jobId && (
+          <div className="flex flex-col gap-4">
+            <UploadZone onUpload={handleUpload} uploadPct={uploadPct} />
+            <HistoryList items={history} />
+          </div>
+        )}
 
         {jobId && job?.status === "completed" && job.result && (
           <Dashboard result={job.result} onReset={reset} />
