@@ -66,8 +66,8 @@
       { "start": 26.4, "end": 32.0, "text": "この経験を通じて、課題を技術で解決する力が身についたと考えています。", "speaker": null }
     ],
     "fillers": [
-      { "text": "えー", "start_char": 16, "end_char": 18 },
-      { "text": "あのー", "start_char": 52, "end_char": 55 }
+      { "text": "えー", "start_char": 14, "end_char": 16 },
+      { "text": "あのー", "start_char": 48, "end_char": 51 }
     ]
   },
   "strengths": [
