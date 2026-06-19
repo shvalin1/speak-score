@@ -5,6 +5,38 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* AnalysisProgress のステップローダー用。コンポーネント内に直書きせず、
+   Tailwind v4 の @theme でユーティリティ化（animate-fold / animate-fold-inner）。 */
+@theme {
+  --animate-fold: fold 2s ease infinite;
+  --animate-fold-inner: fold-inner 2s ease-in infinite;
+}
+@keyframes fold {
+  0% {
+    transform: rotate(0deg);
+  }
+  25%,
+  50% {
+    transform: rotate(180deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+@keyframes fold-inner {
+  0%,
+  25% {
+    height: 0%;
+  }
+  50%,
+  75% {
+    height: 100%;
+  }
+  100% {
+    height: 0%;
+  }
+}
+
 /* 最小リセット。配色・タイポは App.css 側で管理。 */
 * {
   box-sizing: border-box;
