@@ -3,7 +3,7 @@
 // TODO(加藤): D&Dの見た目・エラーメッセージ表示・対応形式の案内を作り込む。
 
 import { useRef, useState } from "react";
-import { UploadCloud } from "lucide-react";
+import { CircleAlert, UploadCloud } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
@@ -76,7 +76,12 @@ export function UploadZone({ onUpload, uploadPct }: Props) {
         ファイルを選択
       </Button>
 
-      {error && <p className="text-sm text-destructive">⚠️ {error}</p>}
+      {error && (
+        <p className="flex items-center gap-1.5 text-sm text-destructive">
+          <CircleAlert className="size-4" />
+          {error}
+        </p>
+      )}
 
       <input
         ref={inputRef}
