@@ -72,7 +72,7 @@ export function UploadZone({ onUpload, uploadPct }: Props) {
         対応形式: {ALLOWED_EXTENSIONS.join(" / ")}（最大200MB）
       </p>
 
-      <Button type="button" size="sm" onClick={() => inputRef.current?.click()}>
+      <Button type="button" size="sm">
         ファイルを選択
       </Button>
 
