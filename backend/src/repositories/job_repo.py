@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 from datetime import UTC, datetime, timedelta
 from threading import Lock
 
-from ..core.config import get_settings
+from ..core.config import LEASE_DURATION_SECONDS, get_settings
 from ..schemas.interview import (
     AnalysisResult,
     InterviewJob,
@@ -22,11 +22,52 @@ from ..schemas.interview import (
     ProcessingStage,
 )
 
-LEASE_DURATION = timedelta(minutes=15)
+LEASE_DURATION = timedelta(seconds=LEASE_DURATION_SECONDS)  # config と単一の出典
+
+# Firestore の 1MiB ドキュメント上限対策。長尺動画の timeline/transcript で complete が
+# 落ちるのを防ぐため、保存前に間引き/切詰めする（§5.1, §10 / step2_plan HIGH）。
+MAX_TIMELINE_POINTS = 200
+MAX_TRANSCRIPT_CHARS = 20000
+MAX_TRANSCRIPT_SEGMENTS = 2000
 
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _downsample(points: list, n: int = MAX_TIMELINE_POINTS) -> list:
+    """等間隔に最大 n 点へ間引く（先頭と末尾の点を必ず含む）。"""
+    if len(points) <= n:
+        return points
+    last = len(points) - 1
+    return [points[round(i * last / (n - 1))] for i in range(n)]
+
+
+def _trim_result(result: AnalysisResult) -> AnalysisResult:
+    """1MiB 対策: timeline を間引き、transcript を上限内に切詰める（必要時のみコピー）。"""
+    am = result.audio_metrics
+    over_tl = (
+        len(am.volume_timeline) > MAX_TIMELINE_POINTS
+        or len(am.pitch_timeline) > MAX_TIMELINE_POINTS
+    )
+    if over_tl:
+        am = am.model_copy(
+            update={
+                "volume_timeline": _downsample(am.volume_timeline),
+                "pitch_timeline": _downsample(am.pitch_timeline),
+            }
+        )
+    tr = result.transcript
+    if len(tr.full_text) > MAX_TRANSCRIPT_CHARS or len(tr.segments) > MAX_TRANSCRIPT_SEGMENTS:
+        tr = tr.model_copy(
+            update={
+                "full_text": tr.full_text[:MAX_TRANSCRIPT_CHARS],
+                "segments": tr.segments[:MAX_TRANSCRIPT_SEGMENTS],
+            }
+        )
+    if am is result.audio_metrics and tr is result.transcript:
+        return result
+    return result.model_copy(update={"audio_metrics": am, "transcript": tr})
 
 
 class JobRepository(ABC):
@@ -61,16 +102,23 @@ class JobRepository(ABC):
     def renew_lease(self, job_id: str, worker_id: str) -> None: ...
 
     @abstractmethod
-    def release_lease(self, job_id: str) -> None: ...
+    def release_lease(self, job_id: str, worker_id: str) -> None:
+        """lease 保持者(worker_id 一致時)のみ解放（CAS）。失効後に奪取した別 worker を守る。"""
+
+    @abstractmethod
+    def get_attempt_count(self, job_id: str) -> int:
+        """これまでのリース取得回数（= 試行回数）。最終試行判定に使う。"""
 
     @abstractmethod
     def update_stage(self, job_id: str, stage: ProcessingStage) -> None: ...
 
     @abstractmethod
-    def complete(self, job_id: str, result: AnalysisResult) -> None: ...
+    def complete(self, job_id: str, result: AnalysisResult, worker_id: str) -> None:
+        """lease 保持者のみ completed に（CAS）。result は 1MiB 対策で間引いて保存。"""
 
     @abstractmethod
-    def fail(self, job_id: str, user_msg: str) -> None: ...
+    def fail(self, job_id: str, user_msg: str, worker_id: str) -> None:
+        """lease 保持者のみ failed に（CAS）。"""
 
     @abstractmethod
     def list_for_owner(self, owner_uid: str) -> list[InterviewSummary]: ...
@@ -157,12 +205,17 @@ class InMemoryJobRepo(JobRepository):
             if d and d["lease_owner"] == worker_id:
                 d["lease_expires_at"] = _now() + LEASE_DURATION
 
-    def release_lease(self, job_id: str) -> None:
+    def release_lease(self, job_id: str, worker_id: str) -> None:
         with self._lock:
             d = self._db.get(job_id)
-            if d:
+            if d and d["lease_owner"] == worker_id:
                 d["lease_owner"] = None
                 d["lease_expires_at"] = None
+
+    def get_attempt_count(self, job_id: str) -> int:
+        with self._lock:
+            d = self._db.get(job_id)
+            return d["attempt_count"] if d else 0
 
     def update_stage(self, job_id: str, stage: ProcessingStage) -> None:
         with self._lock:
@@ -170,21 +223,21 @@ class InMemoryJobRepo(JobRepository):
             if d:
                 d["stage"] = stage
 
-    def complete(self, job_id: str, result: AnalysisResult) -> None:
+    def complete(self, job_id: str, result: AnalysisResult, worker_id: str) -> None:
         with self._lock:
             d = self._db.get(job_id)
-            if d:
+            if d and d["lease_owner"] == worker_id:
                 d["status"] = JobStatus.completed
                 d["stage"] = None
-                d["result"] = result
+                d["result"] = _trim_result(result)
                 d["completed_at"] = _now()
                 d["lease_owner"] = None
                 d["lease_expires_at"] = None
 
-    def fail(self, job_id: str, user_msg: str) -> None:
+    def fail(self, job_id: str, user_msg: str, worker_id: str) -> None:
         with self._lock:
             d = self._db.get(job_id)
-            if d:
+            if d and d["lease_owner"] == worker_id:
                 d["status"] = JobStatus.failed
                 d["error"] = user_msg
                 d["lease_owner"] = None
@@ -245,6 +298,23 @@ class FirestoreJobRepo(JobRepository):
         except NotFound:
             pass
 
+    def _cas_update(self, job_id: str, worker_id: str, fields: dict) -> None:
+        """lease_owner == worker_id のときだけ更新する条件付き書込み（CAS）。
+
+        lease 失効後に別 worker が奪取したケースで、旧 worker が完了/失敗/解放を
+        上書きするのを防ぐ（§5.1）。
+        """
+        from google.cloud import firestore
+
+        @firestore.transactional
+        def _txn(txn) -> None:
+            ref = self._ref(job_id)
+            snap = ref.get(transaction=txn)
+            if snap.exists and snap.get("lease_owner") == worker_id:
+                txn.update(ref, fields)
+
+        _txn(self._fs.transaction())
+
     def create(
         self, job_id: str, owner_uid: str, expire_at: datetime, content_type: str
     ) -> None:
@@ -289,6 +359,10 @@ class FirestoreJobRepo(JobRepository):
     def get_content_type(self, job_id: str) -> str | None:
         snap = self._ref(job_id).get()
         return snap.to_dict().get("content_type") if snap.exists else None
+
+    def get_attempt_count(self, job_id: str) -> int:
+        snap = self._ref(job_id).get()
+        return (snap.to_dict().get("attempt_count") or 0) if snap.exists else 0
 
     def mark_processing(self, job_id: str) -> bool:
         from google.cloud import firestore
@@ -341,28 +415,30 @@ class FirestoreJobRepo(JobRepository):
 
         _txn(self._fs.transaction())
 
-    def release_lease(self, job_id: str) -> None:
-        self._safe_update(job_id, {"lease_owner": None, "lease_expires_at": None})
+    def release_lease(self, job_id: str, worker_id: str) -> None:
+        self._cas_update(job_id, worker_id, {"lease_owner": None, "lease_expires_at": None})
 
     def update_stage(self, job_id: str, stage: ProcessingStage) -> None:
         self._safe_update(job_id, {"stage": stage.value})
 
-    def complete(self, job_id: str, result: AnalysisResult) -> None:
-        self._safe_update(
+    def complete(self, job_id: str, result: AnalysisResult, worker_id: str) -> None:
+        self._cas_update(
             job_id,
+            worker_id,
             {
                 "status": JobStatus.completed.value,
                 "stage": None,
-                "result": result.model_dump(mode="json"),
+                "result": _trim_result(result).model_dump(mode="json"),
                 "completed_at": _now(),
                 "lease_owner": None,
                 "lease_expires_at": None,
             },
         )
 
-    def fail(self, job_id: str, user_msg: str) -> None:
-        self._safe_update(
+    def fail(self, job_id: str, user_msg: str, worker_id: str) -> None:
+        self._cas_update(
             job_id,
+            worker_id,
             {
                 "status": JobStatus.failed.value,
                 "error": user_msg,

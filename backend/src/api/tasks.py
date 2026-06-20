@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 
@@ -83,17 +84,31 @@ async def process(
     if not repo.try_acquire_lease(job_id, worker_id):
         return {"status": "in_progress"}  # 別workerが処理中 or 遷移不可
 
+    # リース取得で attempt_count はインクリメント済み。max_attempts に達した試行で
+    # 一時的失敗を返すと Cloud Tasks が task を破棄し worker が再呼出されず status が
+    # processing のまま永久滞留する → 最終試行では明示 fail に倒す（HIGH）。
+    is_last_attempt = repo.get_attempt_count(job_id) >= settings.max_task_attempts
+
     try:
-        result = await pipeline.run_pipeline(job_id, repo, worker_id)
-        repo.complete(job_id, result)
+        # 直列(ffmpeg→Whisper→librosa→gpt-4o)が Cloud Run timeout(1800s)に張り付くのを防ぐ
+        # ため、全体を soft_timeout で打ち切る。
+        result = await asyncio.wait_for(
+            pipeline.run_pipeline(job_id, repo, worker_id),
+            timeout=settings.soft_timeout_seconds,
+        )
+        repo.complete(job_id, result, worker_id)
         return {"status": "completed"}
-    except RecoverableError as e:
-        repo.release_lease(job_id)
+    except (RecoverableError, TimeoutError) as e:  # asyncio.wait_for は TimeoutError を送出
+        if is_last_attempt:
+            log.warning("job %s: 最終試行で一時的失敗 → fail に倒す: %s", job_id, e)
+            repo.fail(job_id, USER_FACING_FAIL_MSG, worker_id)
+            return {"status": "failed"}
+        repo.release_lease(job_id, worker_id)
         # Cloud Tasks に再試行させる（FastAPIで5xxを返す）
         from fastapi import HTTPException
 
         raise HTTPException(status_code=503, detail="recoverable") from e
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001 FatalError 含む恒久的失敗は即 fail（再試行しない）
         log.exception("pipeline failed for job %s: %s", job_id, e)
-        repo.fail(job_id, USER_FACING_FAIL_MSG)
+        repo.fail(job_id, USER_FACING_FAIL_MSG, worker_id)
         return {"status": "failed"}

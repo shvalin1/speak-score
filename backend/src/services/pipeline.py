@@ -29,39 +29,32 @@ from ..schemas.interview import (
 from . import audio_analysis, llm_evaluation, scoring, transcription
 
 
-def _prepare_audio(job_id: str, content_type: str, settings: Settings) -> str:
+def _prepare_audio(job_id: str, content_type: str, settings: Settings, tmp_dir: str) -> str:
     """GCS から元動画を DL → WAV mono16k に変換し、その一時パスを返す（同期・CPU/IO bound）。
 
-    一時ディレクトリは「成功時は WAV を残して呼び出し側が掃除」「失敗時はここで掃除」。
+    tmp_dir は呼び出し側(run_pipeline)が作成・掃除する（soft_timeout の cancel で
+    この to_thread が中断されても finally で確実に消すため）。
     エラー分類: DL 失敗=一時的(RecoverableError)、変換/長さ/サイズ=恒久的(FatalError)。
     """
-    tmp_dir = tempfile.mkdtemp(prefix=f"job_{job_id}_")
     ext = storage.ext_from_content_type(content_type)
     src_path = os.path.join(tmp_dir, f"source.{ext}")
     wav_path = os.path.join(tmp_dir, "audio.wav")
     try:
-        try:
-            storage.download_to_tmp(job_id, content_type, src_path)
-        except Exception as e:  # noqa: BLE001 GCS DL は一時的失敗として再試行に倒す
-            raise RecoverableError(f"source download failed: {e}") from e
+        storage.download_to_tmp(job_id, content_type, src_path)
+    except Exception as e:  # noqa: BLE001 GCS DL は一時的失敗として再試行に倒す
+        raise RecoverableError(f"source download failed: {e}") from e
 
-        duration = media.probe_duration(src_path)
-        if duration > settings.max_video_seconds:
-            raise FatalError(
-                f"動画が長すぎます（{duration:.0f}s > {settings.max_video_seconds}s）"
-            )
+    duration = media.probe_duration(src_path)
+    if duration > settings.max_video_seconds:
+        raise FatalError(f"動画が長すぎます（{duration:.0f}s > {settings.max_video_seconds}s）")
 
-        media.extract_to_wav(src_path, wav_path)
+    media.extract_to_wav(src_path, wav_path)
 
-        size = os.path.getsize(wav_path)
-        if size > settings.max_audio_bytes:
-            raise FatalError(f"抽出音声が大きすぎます（{size} bytes）")
+    size = os.path.getsize(wav_path)
+    if size > settings.max_audio_bytes:
+        raise FatalError(f"抽出音声が大きすぎます（{size} bytes）")
 
-        os.remove(src_path)  # 元動画は不要、WAV のみ残す
-        return wav_path
-    except Exception:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise
+    return wav_path
 
 
 async def run_pipeline(job_id: str, repo: JobRepository, worker_id: str) -> AnalysisResult:
@@ -73,9 +66,13 @@ async def run_pipeline(job_id: str, repo: JobRepository, worker_id: str) -> Anal
     if not content_type:
         raise FatalError(f"content_type not found for job {job_id}")
 
-    # DL→ffmpeg は同期 CPU/IO bound のため別スレッドへ（async ループを塞がない）
-    wav_path = await asyncio.to_thread(_prepare_audio, job_id, content_type, settings)
+    # tmp_dir は呼び出し側で作り finally で必ず掃除（soft_timeout の cancel が
+    # _prepare_audio の to_thread 中に起きても tmp がリークしないように）。
+    tmp_dir = tempfile.mkdtemp(prefix=f"job_{job_id}_")
     try:
+        # DL→ffmpeg は同期 CPU/IO bound のため別スレッドへ（async ループを塞がない）
+        wav_path = await asyncio.to_thread(_prepare_audio, job_id, content_type, settings, tmp_dir)
+
         repo.update_stage(job_id, ProcessingStage.transcribing)
         repo.renew_lease(job_id, worker_id)
         transcript = await transcription.transcribe(wav_path)
@@ -115,4 +112,4 @@ async def run_pipeline(job_id: str, repo: JobRepository, worker_id: str) -> Anal
         )
     finally:
         # Cloud Run インスタンス再利用でディスクが溜まらないよう一時ディレクトリごと削除
-        shutil.rmtree(os.path.dirname(wav_path), ignore_errors=True)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
