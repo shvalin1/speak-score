@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     dev_uid: str = "dev-user"
 
     # --- LLM ---
-    llm_provider: str = "anthropic"      # anthropic | openai
+    llm_provider: str = "openai"         # anthropic | openai（Step2 は OpenAI 1本: Whisper+gpt-4o）
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     whisper_api_key: str = ""            # 通常は openai_api_key と同一

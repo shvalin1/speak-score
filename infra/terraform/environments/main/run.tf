@@ -63,6 +63,17 @@ resource "google_cloud_run_v2_service" "backend" {
         name  = "FIREBASE_PROJECT"
         value = var.project_id
       }
+      # Step2: Whisper + gpt-4o 用。値は Secret Manager（tfstate に入れない・secrets.tf）。
+      # 注意: deploy 前に openai-api-key へ版を1つ追加しておくこと（版0だと Run 起動失敗）。
+      env {
+        name = "OPENAI_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = "openai-api-key"
+            version = "latest"
+          }
+        }
+      }
       # Step1b 実機検証窓のみ true。ユーザーAPIを dev_uid で叩けるようにする。
       # worker の OIDC は worker_oidc_disabled(既定 False)で別管理＝常に必須(fail-closed)。
       dynamic "env" {
