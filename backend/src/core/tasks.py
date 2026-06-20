@@ -59,6 +59,9 @@ def enqueue_process(job_id: str) -> None:
             settings.tasks_queue,
             f"{job_id}-{uuid.uuid4().hex[:8]}",
         ),
+        # 実 pipeline は ffmpeg+librosa+LLM で既定 600s を超えうる。Cloud Run timeout(1800s)
+        # に揃え、超過時の二重 dispatch（lease で多重処理は防げるが無駄 retry）を避ける。
+        "dispatch_deadline": {"seconds": 1800},
         "http_request": {
             "http_method": tasks_v2.HttpMethod.POST,
             "url": settings.worker_url + "/api/tasks/process",

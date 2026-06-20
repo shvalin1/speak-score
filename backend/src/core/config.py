@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     # --- pipeline ---
     max_video_seconds: int = 300         # 動画長5分上限（§5.1）
     max_upload_bytes: int = 200 * 1024 * 1024
-    soft_timeout_seconds: int = 840      # Cloud Run timeout=900 に対する soft 上限
+    soft_timeout_seconds: int = 840      # Cloud Run timeout=1800 に対する soft 上限
 
     # --- emulators (local docker-compose) ---
     firestore_emulator_host: str = ""    # FIRESTORE_EMULATOR_HOST
