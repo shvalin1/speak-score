@@ -20,6 +20,7 @@ export function UploadZone({ onUpload, uploadPct }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const validateAndUpload = (file: File) => {
     const extension = file.name.split(".").pop()?.toLowerCase();
@@ -32,7 +33,7 @@ export function UploadZone({ onUpload, uploadPct }: Props) {
       return;
     }
     setError(null);
-    onUpload(file);
+    setSelectedFile(file);
   };
 
   if (uploadPct !== null) {
@@ -42,6 +43,32 @@ export function UploadZone({ onUpload, uploadPct }: Props) {
           アップロード中… {uploadPct}%
         </p>
         <Progress value={uploadPct} className="mx-auto max-w-xs" />
+      </div>
+    );
+  }
+
+  if (selectedFile) {
+    return (
+      <div className="flex flex-col items-center gap-1 rounded-xl border border-border bg-card p-12 text-center">
+        <p className="text-sm font-medium">{selectedFile.name}</p>
+        <p className="mb-5 text-xs text-muted-foreground">
+          {(selectedFile.size / 1024 / 1024).toFixed(1)} MB
+        </p>
+        <div className="flex gap-3">
+          <Button
+            type="button"
+            onClick={() => {
+              const file = selectedFile;
+              setSelectedFile(null);
+              onUpload(file);
+            }}
+          >
+            アップロード
+          </Button>
+          <Button type="button" variant="outline" onClick={() => setSelectedFile(null)}>
+            キャンセル
+          </Button>
+        </div>
       </div>
     );
   }
