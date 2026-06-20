@@ -5,7 +5,7 @@ resource "google_firestore_database" "default" {
   location_id = var.region
   type        = "FIRESTORE_NATIVE"
 
-  # 誤削除防止。破棄したいときは明示的に外す。
+  # dev 単一環境。terraform destroy で DB ごと片付く（DELETE）。本番運用に移すなら ABANDON に。
   deletion_policy = "DELETE"
 
   depends_on = [google_project_service.services]
@@ -20,6 +20,7 @@ resource "google_firestore_field" "interviews_ttl" {
 
   ttl_config {}
 
-  # TTL 以外のインデックス設定には触れない（既定のまま）。
+  # TTL 専用フィールド（検索/ソートしない）。空 index_config で単一フィールドインデックスを
+  # 無効化し、書き込みコストを節約する。
   index_config {}
 }

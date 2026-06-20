@@ -9,6 +9,9 @@ resource "google_cloud_run_v2_service" "backend" {
   template {
     service_account = google_service_account.run.email
 
+    # backend は worker（同期パイプライン）も兼ねる。動画処理は5分の既定を超えうるため延長。
+    timeout = "1800s"
+
     scaling {
       min_instance_count = var.min_instances
       max_instance_count = 5
@@ -16,6 +19,14 @@ resource "google_cloud_run_v2_service" "backend" {
 
     containers {
       image = var.backend_image
+
+      # ffmpeg 抽出 + librosa を捌くため既定(1CPU/512Mi)から増強（OOM/スロットル回避）。
+      resources {
+        limits = {
+          cpu    = "2"
+          memory = "2Gi"
+        }
+      }
 
       env {
         name  = "GCP_PROJECT"

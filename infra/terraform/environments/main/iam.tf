@@ -1,3 +1,7 @@
+data "google_project" "current" {
+  project_id = var.project_id
+}
+
 # === Service Accounts ===
 
 # Cloud Run（backend）実行SA。Firestore/GCS/署名URL/タスク投入を担う。
@@ -40,11 +44,21 @@ resource "google_service_account_iam_member" "run_sign_self" {
   member             = "serviceAccount:${google_service_account.run.email}"
 }
 
-# Cloud Tasks 作成時に invoker SA を OIDC 主体として指定するには actAs が要る。
+# Cloud Tasks 作成時(create_task)に invoker SA を OIDC 主体として指定するには actAs が要る。
 resource "google_service_account_iam_member" "run_actas_invoker" {
   service_account_id = google_service_account.tasks_invoker.name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.run.email}"
+}
+
+# 配信時(dispatch)に Cloud Tasks サービスエージェントが invoker SA を impersonate して
+# OIDC ID トークンを発行する。これには actAs(上)とは別に、サービスエージェントへの
+# tokenCreator が必要（無いと dispatch 時に getOpenIdToken が PERMISSION_DENIED）。
+# ※ apply 成功だけでは検出されず、実タスク配信で初めて顕在化する罠。
+resource "google_service_account_iam_member" "cloudtasks_mint_oidc" {
+  service_account_id = google_service_account.tasks_invoker.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-cloudtasks.iam.gserviceaccount.com"
 }
 
 # === backend Cloud Run の呼び出し許可 ===
