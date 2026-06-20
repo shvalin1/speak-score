@@ -54,7 +54,7 @@ def repo(request, monkeypatch) -> JobRepository:
 
 def test_create_and_get(repo: JobRepository) -> None:
     jid = uuid.uuid4().hex
-    repo.create(jid, owner_uid="u1", expire_at=_future())
+    repo.create(jid, owner_uid="u1", expire_at=_future(), content_type="video/mp4")
 
     job = repo.get(jid)
     assert job is not None
@@ -62,6 +62,9 @@ def test_create_and_get(repo: JobRepository) -> None:
     assert job.status == JobStatus.awaiting_upload
     assert job.stage is None
     assert repo.get_owner(jid) == "u1"
+    assert repo.get_content_type(jid) == "video/mp4"
+    # 未知ジョブは None
+    assert repo.get_content_type("nope-" + uuid.uuid4().hex) is None
 
 
 def test_get_missing_returns_none(repo: JobRepository) -> None:
@@ -71,7 +74,7 @@ def test_get_missing_returns_none(repo: JobRepository) -> None:
 
 def test_mark_processing_only_once(repo: JobRepository) -> None:
     jid = uuid.uuid4().hex
-    repo.create(jid, owner_uid="u1", expire_at=_future())
+    repo.create(jid, owner_uid="u1", expire_at=_future(), content_type="video/mp4")
 
     assert repo.mark_processing(jid) is True
     # 2回目は遷移不可（二重 enqueue 防止）
@@ -81,7 +84,7 @@ def test_mark_processing_only_once(repo: JobRepository) -> None:
 
 def test_lease_is_exclusive(repo: JobRepository) -> None:
     jid = uuid.uuid4().hex
-    repo.create(jid, owner_uid="u1", expire_at=_future())
+    repo.create(jid, owner_uid="u1", expire_at=_future(), content_type="video/mp4")
     repo.mark_processing(jid)
 
     assert repo.try_acquire_lease(jid, "worker-a") is True
@@ -92,14 +95,14 @@ def test_lease_is_exclusive(repo: JobRepository) -> None:
 
 def test_lease_requires_processing(repo: JobRepository) -> None:
     jid = uuid.uuid4().hex
-    repo.create(jid, owner_uid="u1", expire_at=_future())
+    repo.create(jid, owner_uid="u1", expire_at=_future(), content_type="video/mp4")
     # awaiting_upload のままではリース取得不可
     assert repo.try_acquire_lease(jid, "worker-a") is False
 
 
 def test_update_stage(repo: JobRepository) -> None:
     jid = uuid.uuid4().hex
-    repo.create(jid, owner_uid="u1", expire_at=_future())
+    repo.create(jid, owner_uid="u1", expire_at=_future(), content_type="video/mp4")
     repo.mark_processing(jid)
     repo.try_acquire_lease(jid, "worker-a")
 
@@ -109,7 +112,7 @@ def test_update_stage(repo: JobRepository) -> None:
 
 def test_complete_stores_result(repo: JobRepository) -> None:
     jid = uuid.uuid4().hex
-    repo.create(jid, owner_uid="u1", expire_at=_future())
+    repo.create(jid, owner_uid="u1", expire_at=_future(), content_type="video/mp4")
     repo.mark_processing(jid)
     repo.try_acquire_lease(jid, "worker-a")
 
@@ -127,7 +130,7 @@ def test_complete_stores_result(repo: JobRepository) -> None:
 
 def test_fail_sets_user_message(repo: JobRepository) -> None:
     jid = uuid.uuid4().hex
-    repo.create(jid, owner_uid="u1", expire_at=_future())
+    repo.create(jid, owner_uid="u1", expire_at=_future(), content_type="video/mp4")
     repo.mark_processing(jid)
 
     repo.fail(jid, "処理に失敗しました。")
@@ -138,7 +141,7 @@ def test_fail_sets_user_message(repo: JobRepository) -> None:
 
 def test_release_lease_allows_reacquire(repo: JobRepository) -> None:
     jid = uuid.uuid4().hex
-    repo.create(jid, owner_uid="u1", expire_at=_future())
+    repo.create(jid, owner_uid="u1", expire_at=_future(), content_type="video/mp4")
     repo.mark_processing(jid)
 
     assert repo.try_acquire_lease(jid, "worker-a") is True
@@ -154,7 +157,7 @@ def test_lease_reacquire_after_expiry(repo: JobRepository, monkeypatch) -> None:
 
     monkeypatch.setattr(jr, "LEASE_DURATION", timedelta(seconds=-1))
     jid = uuid.uuid4().hex
-    repo.create(jid, owner_uid="u1", expire_at=_future())
+    repo.create(jid, owner_uid="u1", expire_at=_future(), content_type="video/mp4")
     repo.mark_processing(jid)
 
     assert repo.try_acquire_lease(jid, "worker-a") is True  # 取得直後に失効するリース
@@ -169,9 +172,9 @@ def test_list_is_owner_scoped_and_sorted(repo: JobRepository) -> None:
     ids = []
     for _ in range(2):
         jid = uuid.uuid4().hex
-        repo.create(jid, owner_uid=owner, expire_at=_future())
+        repo.create(jid, owner_uid=owner, expire_at=_future(), content_type="video/mp4")
         ids.append(jid)
-    repo.create(uuid.uuid4().hex, owner_uid=other, expire_at=_future())
+    repo.create(uuid.uuid4().hex, owner_uid=other, expire_at=_future(), content_type="video/mp4")
 
     summaries = repo.list_for_owner(owner)
     assert {s.job_id for s in summaries} == set(ids)

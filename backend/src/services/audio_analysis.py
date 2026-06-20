@@ -1,4 +1,4 @@
-"""librosa による音声特徴量抽出（FLACをsoundfileで高速ロード）。
+"""librosa による音声特徴量抽出（WAV mono16k を soundfile でロード）。
 
 TODO(石川/Step2): librosa で話速・フィラー率・無音分布・ピッチ変動・音量を算出する。
   - silence: librosa.effects.split（top_db は実データでチューニング §7 #6）
@@ -13,7 +13,7 @@ from __future__ import annotations
 from ..schemas.interview import AudioMetrics, Segment, TimePoint, Transcript
 
 
-def analyze_audio(flac_path: str, transcript: Transcript) -> AudioMetrics:
+def analyze_audio(audio_path: str, transcript: Transcript) -> AudioMetrics:
     # --- DUMMY（Step2で librosa 実計算に差し替え） ---
     return AudioMetrics(
         speech_rate_cpm=380.0,

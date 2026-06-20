@@ -31,13 +31,23 @@ def _now() -> datetime:
 
 class JobRepository(ABC):
     @abstractmethod
-    def create(self, job_id: str, owner_uid: str, expire_at: datetime) -> None: ...
+    def create(
+        self, job_id: str, owner_uid: str, expire_at: datetime, content_type: str
+    ) -> None: ...
 
     @abstractmethod
     def get(self, job_id: str) -> InterviewJob | None: ...
 
     @abstractmethod
     def get_owner(self, job_id: str) -> str | None: ...
+
+    @abstractmethod
+    def get_content_type(self, job_id: str) -> str | None:
+        """アップロード時の content_type（内部用）。
+
+        抽出（拡張子推定）・/start メタデータ確認で必要。GET レスポンスの
+        InterviewJob 契約には載せない（内部情報のため）。
+        """
 
     @abstractmethod
     def mark_processing(self, job_id: str) -> bool:
@@ -73,11 +83,14 @@ class InMemoryJobRepo(JobRepository):
         self._db: dict[str, dict] = {}
         self._lock = Lock()
 
-    def create(self, job_id: str, owner_uid: str, expire_at: datetime) -> None:
+    def create(
+        self, job_id: str, owner_uid: str, expire_at: datetime, content_type: str
+    ) -> None:
         with self._lock:
             self._db[job_id] = {
                 "job_id": job_id,
                 "owner_uid": owner_uid,
+                "content_type": content_type,
                 "status": JobStatus.awaiting_upload,
                 "stage": None,
                 "created_at": _now(),
@@ -110,6 +123,11 @@ class InMemoryJobRepo(JobRepository):
         with self._lock:
             d = self._db.get(job_id)
             return d["owner_uid"] if d else None
+
+    def get_content_type(self, job_id: str) -> str | None:
+        with self._lock:
+            d = self._db.get(job_id)
+            return d.get("content_type") if d else None
 
     def mark_processing(self, job_id: str) -> bool:
         with self._lock:
@@ -227,11 +245,14 @@ class FirestoreJobRepo(JobRepository):
         except NotFound:
             pass
 
-    def create(self, job_id: str, owner_uid: str, expire_at: datetime) -> None:
+    def create(
+        self, job_id: str, owner_uid: str, expire_at: datetime, content_type: str
+    ) -> None:
         self._ref(job_id).set(
             {
                 "job_id": job_id,
                 "owner_uid": owner_uid,
+                "content_type": content_type,
                 "status": JobStatus.awaiting_upload.value,
                 "stage": None,
                 "created_at": _now(),
@@ -264,6 +285,10 @@ class FirestoreJobRepo(JobRepository):
     def get_owner(self, job_id: str) -> str | None:
         snap = self._ref(job_id).get()
         return snap.to_dict().get("owner_uid") if snap.exists else None
+
+    def get_content_type(self, job_id: str) -> str | None:
+        snap = self._ref(job_id).get()
+        return snap.to_dict().get("content_type") if snap.exists else None
 
     def mark_processing(self, job_id: str) -> bool:
         from google.cloud import firestore

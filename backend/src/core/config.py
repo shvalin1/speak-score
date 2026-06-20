@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     # --- pipeline ---
     max_video_seconds: int = 300         # 動画長5分上限（§5.1）
     max_upload_bytes: int = 200 * 1024 * 1024
+    # 抽出後 WAV(mono16k) の上限。transcription API の 25MB 制限に合わせる。
+    # WAV16k/300s ≈ 9.6MB なので余裕があるが、想定外の長尺/多chに対する安全弁。
+    max_audio_bytes: int = 25 * 1024 * 1024
     soft_timeout_seconds: int = 840      # Cloud Run timeout=1800 に対する soft 上限
 
     # --- emulators (local docker-compose) ---

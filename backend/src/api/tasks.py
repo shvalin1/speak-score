@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from ..core.config import Settings, get_settings
+from ..core.errors import RecoverableError
 from ..repositories.job_repo import JobRepository, get_job_repo
 from ..services import pipeline
 
@@ -20,13 +21,13 @@ router = APIRouter(tags=["tasks"])
 
 USER_FACING_FAIL_MSG = "処理に失敗しました。動画を確認して再アップロードしてください。"
 
+# 後方互換: RecoverableError は core.errors に移動（pipeline との循環 import 回避）。
+# 既存の `tasks.RecoverableError` 参照のため re-export しておく。
+__all__ = ["RecoverableError", "router"]
+
 
 class ProcessRequest(BaseModel):
     job_id: str
-
-
-class RecoverableError(Exception):
-    """一時的失敗。Cloud Tasks に再試行させる（5xxを返す）。"""
 
 
 def _verify_oidc(request: Request, settings: Settings) -> None:

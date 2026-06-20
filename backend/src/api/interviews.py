@@ -54,7 +54,12 @@ def create_interview(
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "file too large")
 
     job_id = uuid.uuid4().hex
-    repo.create(job_id, owner_uid=uid, expire_at=_utcnow() + JOB_TTL)
+    repo.create(
+        job_id,
+        owner_uid=uid,
+        expire_at=_utcnow() + JOB_TTL,
+        content_type=req.content_type,
+    )
     upload_url, upload_headers = storage.signed_put_url(job_id, req.content_type)
     return CreateInterviewResponse(
         job_id=job_id,
@@ -69,6 +74,7 @@ def start_interview(
     job_id: str,
     uid: str = Depends(get_uid),
     repo: JobRepository = Depends(get_job_repo),
+    settings: Settings = Depends(get_settings),
 ) -> StartResponse:
     owner = repo.get_owner(job_id)
     if owner is None:
@@ -76,8 +82,19 @@ def start_interview(
     if owner != uid:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "forbidden")
 
-    # GCSメタデータでアップロード完了＋サイズ確認（§5.2: Aの実効サイズ制限はここで担保）
-    # NOTE: ローカルは GCS 未配線のため存在確認はスキップ（実GCSで有効化）。
+    # GCS メタデータでアップロード完了＋サイズ＋Content-Type 整合を確認（§5.2: Aの実効サイズ制限）。
+    # 未アップロードのまま start すると後段で「過大評価」フットガンになるためここで弾く。
+    # ローカル（gcs_bucket 空）は GCS 未配線のため短絡スキップ。
+    if settings.gcs_bucket:
+        content_type = repo.get_content_type(job_id)
+        meta = storage.get_metadata(job_id, content_type or "")
+        if not meta.exists:
+            raise HTTPException(status.HTTP_409_CONFLICT, "アップロードが完了していません")
+        if meta.size > settings.max_upload_bytes:
+            raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "file too large")
+        if content_type and meta.content_type and meta.content_type != content_type:
+            raise HTTPException(status.HTTP_409_CONFLICT, "content-type mismatch")
+
     # transaction で awaiting_upload→processing を一度だけ許可（二重enqueue防止）
     if not repo.mark_processing(job_id):
         # 既に processing/completed/failed → 現状態を返す（再enqueueしない）

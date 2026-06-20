@@ -14,7 +14,7 @@ from ..schemas.interview import FillerHit, Transcript, TranscriptSegment
 FILLER_PATTERNS = ["えー", "えーと", "あのー", "あの", "その", "まあ", "なんか"]
 
 
-async def transcribe(flac_path: str) -> Transcript:
+async def transcribe(audio_path: str) -> Transcript:
     # --- DUMMY（Step2で Whisper 実呼び出しに差し替え） ---
     full_text = "本日はよろしくお願いします。えー、自己紹介をさせていただきます。"
     return Transcript(
