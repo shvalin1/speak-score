@@ -18,7 +18,11 @@ export function AppHeader() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { signOut } = useAuth();
-  const active: HeaderTab = pathname.startsWith("/history") ? "history" : "home";
+  const active: HeaderTab | null = pathname === "/"
+    ? "home"
+    : pathname.startsWith("/history")
+      ? "history"
+      : null;
 
   return (
     <header className="sticky top-0 z-30 flex h-[60px] items-center justify-between border-b border-border bg-background px-6">

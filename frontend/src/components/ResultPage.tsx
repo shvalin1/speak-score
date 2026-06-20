@@ -6,6 +6,7 @@
 
 import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import { GraduationCap, Video } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Dashboard } from "./Dashboard";
 import type { AnalysisResult, TranscriptSegment } from "../types/interview";
@@ -36,6 +37,7 @@ export function ResultPage({
   initialTab = "score",
   onReset,
 }: Props) {
+  const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>(initialTab);
 
   return (
@@ -43,9 +45,21 @@ export function ResultPage({
       {/* パンくず + サブタブ（セグメント） */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span>履歴</span>
+          <button
+            type="button"
+            onClick={() => navigate("/history")}
+            className="outline-none hover:text-foreground hover:underline"
+          >
+            履歴
+          </button>
           <span>/</span>
-          <span className="text-foreground/80">{createdLabel}</span>
+          <button
+            type="button"
+            onClick={() => setTab("score")}
+            className="text-foreground/80 outline-none hover:text-foreground hover:underline"
+          >
+            {createdLabel}
+          </button>
         </div>
 
         <div className="flex rounded-[10px] bg-muted p-0.5">

@@ -4,7 +4,7 @@
 //
 // MVPは匿名認証。Googleサインインは永続履歴が欲しくなったら足す（数行）。
 
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { initializeApp, type FirebaseApp } from "firebase/app";
 import {
   getAuth,
@@ -46,8 +46,12 @@ export interface UseAuth {
   signOut: () => Promise<void>;
 }
 
-/** AuthGate が使う。モック時は即サインイン済み扱い。 */
-export function useAuth(): UseAuth {
+/**
+ * 認証状態を1つだけ持つための内部フック。AuthProvider からのみ呼ぶ。
+ * AuthGate と AppHeader など複数箇所が同じ状態を見られるよう、Context経由で共有する
+ * （フックを呼ぶたびに別状態を持つと、モック時の signOut がここでしか反映されず破綻するため）。
+ */
+export function useProvideAuth(): UseAuth {
   const [user, setUser] = useState<{ uid: string } | null>(
     USE_MOCK ? { uid: "mock-uid" } : null,
   );
@@ -78,4 +82,13 @@ export function useAuth(): UseAuth {
   };
 
   return { user, ready, signIn, signOut };
+}
+
+export const AuthContext = createContext<UseAuth | null>(null);
+
+/** AuthGate / AppHeader が使う。AuthProvider（main.tsx）の内側でのみ呼べる。 */
+export function useAuth(): UseAuth {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
+  return ctx;
 }
