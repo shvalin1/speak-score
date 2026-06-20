@@ -116,12 +116,34 @@ function putToSignedUrl(
 // 静的JSONだけだと「ポーリングをどう模すか」で加藤が詰まるため、
 // 時間経過で awaiting_upload → processing(各stage) → completed を返すモックを用意する。
 
+// サイズ/フォーマットはUploadZoneのクライアント側検証で弾かれるため、アップロード後の
+// サーバー側エラーとしては起こり得ない。アップロード成功後に現実的に起こりうる失敗
+// （AGENTS.mdのパイプライン: ffmpeg→Whisper→librosa→scoring→LLM）に合わせる。
+type MockFailReason = "audio" | "transcribe" | "server";
+
 interface MockJob {
   job_id: string;
   created_at: string;
   startedAt: number; // /start を押した時刻（performance.now基準）
-  shouldFail: boolean; // テスト用: ファイル名に "fail" を含めると失敗扱いにする（Issue #9）
+  failReason: MockFailReason | null; // テスト用: ファイル名に "fail" を含めると失敗扱いにする（Issue #9）
 }
+
+// ファイル名に "fail" を含めると失敗をシミュレートする（テスト用）。
+// "fail-audio" / "fail-transcribe" で種別を変え、formatJobError（JobPage.tsx）の
+// 分岐を動作確認できるようにする。それ以外の "fail" は汎用サーバーエラー（タイムアウト等）扱い。
+function detectMockFailure(filename: string): MockFailReason | null {
+  const lower = filename.toLowerCase();
+  if (!lower.includes("fail")) return null;
+  if (lower.includes("audio")) return "audio";
+  if (lower.includes("transcribe")) return "transcribe";
+  return "server";
+}
+
+const MOCK_ERROR_MESSAGES: Record<MockFailReason, string> = {
+  audio: "mock: simulated error (failed to extract audio track from video)",
+  transcribe: "mock: simulated error (transcription failed - audio too short or silent)",
+  server: "mock: simulated server error (timeout calling evaluation API)",
+};
 
 // 本物のFirestoreはリロードしても消えないが、Mapだけだとブラウザのメモリ上に
 // しか無くリロードで消えてしまう。sessionStorageにも保存し、タブを閉じるまでは
@@ -177,7 +199,7 @@ async function mockUploadInterview(
     job_id,
     created_at: new Date().toISOString(),
     startedAt: Date.now(),
-    shouldFail: file.name.toLowerCase().includes("fail"),
+    failReason: detectMockFailure(file.name),
   });
   saveMockJobs();
   return job_id;
@@ -190,14 +212,14 @@ async function mockGetInterview(jobId: string): Promise<InterviewJob> {
   const elapsed = Date.now() - job.startedAt;
 
   if (elapsed >= MOCK_TOTAL_MS) {
-    if (job.shouldFail) {
+    if (job.failReason) {
       return {
         job_id: jobId,
         status: "failed",
         stage: null,
         created_at: job.created_at,
         completed_at: new Date().toISOString(),
-        error: 'mock: simulated server error (filename contained "fail")',
+        error: MOCK_ERROR_MESSAGES[job.failReason],
         result: null,
       };
     }
@@ -231,7 +253,7 @@ async function mockListInterviews(): Promise<InterviewSummary[]> {
   await sleep(150);
   return [...mockJobs.values()].map((j) => {
     const done = Date.now() - j.startedAt >= MOCK_TOTAL_MS;
-    const status: JobStatus = done ? (j.shouldFail ? "failed" : "completed") : "processing";
+    const status: JobStatus = done ? (j.failReason ? "failed" : "completed") : "processing";
     return {
       job_id: j.job_id,
       created_at: j.created_at,

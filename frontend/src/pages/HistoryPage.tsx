@@ -7,6 +7,7 @@ import { Inbox } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { listInterviews } from "../services/api";
 import { intervalMs } from "../hooks/useInterviewJob";
 import type { InterviewSummary, JobStatus } from "../types/interview";
@@ -39,6 +40,7 @@ const STATUS: Record<JobStatus, StatusStyle> = {
 export function HistoryPage() {
   const navigate = useNavigate();
   const [items, setItems] = useState<InterviewSummary[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   // processing/awaiting_uploadの項目が残っている間は、完了/失敗に変わるまで定期的に再取得する。
   useEffect(() => {
@@ -50,12 +52,15 @@ export function HistoryPage() {
         const list = await listInterviews();
         if (cancelled) return;
         setItems(list);
+        setIsLoading(false);
         if (list.some(isPending)) {
           timer = window.setTimeout(tick, intervalMs);
         }
       } catch (err) {
         console.error("履歴一覧の取得に失敗しました", err);
-        if (!cancelled) timer = window.setTimeout(tick, intervalMs);
+        if (cancelled) return;
+        setIsLoading(false);
+        timer = window.setTimeout(tick, intervalMs);
       }
     };
     tick();
@@ -77,7 +82,30 @@ export function HistoryPage() {
         <CardTitle className="text-lg">分析履歴</CardTitle>
       </CardHeader>
       <CardContent>
-        {sorted.length === 0 ? (
+        {isLoading ? (
+          <div className="overflow-hidden rounded-xl border border-border">
+            <div className="grid grid-cols-[150px_130px_110px_1fr] items-center gap-3 border-b border-border bg-muted/50 px-4 py-2.5 text-xs font-semibold tracking-wide text-muted-foreground">
+              <span>日時</span>
+              <span>総合スコア</span>
+              <span>ステータス</span>
+              <span className="text-right">操作</span>
+            </div>
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="grid grid-cols-[150px_130px_110px_1fr] items-center gap-3 border-b border-border/60 px-4 py-3.5 last:border-b-0"
+              >
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-14" />
+                <Skeleton className="h-5 w-16 rounded-full" />
+                <div className="flex justify-end gap-2">
+                  <Skeleton className="h-7 w-20" />
+                  <Skeleton className="h-7 w-20" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : sorted.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-12 text-center text-sm text-muted-foreground">
             <Inbox className="size-8" />
             まだ分析履歴がありません
@@ -137,10 +165,16 @@ export function HistoryPage() {
                           動画確認
                         </Button>
                       </>
+                    ) : item.status === "processing" || item.status === "failed" ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => navigate(`/jobs/${item.job_id}`)}
+                      >
+                        {item.status === "processing" ? "分析中…" : "詳細を見る"}
+                      </Button>
                     ) : (
-                      <span className="text-xs text-muted-foreground">
-                        {item.status === "processing" ? "分析中…" : "—"}
-                      </span>
+                      <span className="text-xs text-muted-foreground">—</span>
                     )}
                   </div>
                 </div>
