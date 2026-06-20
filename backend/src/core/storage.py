@@ -46,15 +46,25 @@ def signed_put_url(job_id: str, content_type: str) -> tuple[str, dict[str, str]]
         # ローカルモック（実GCSでは下の実装パスを通す）
         return f"http://localhost:9000/mock-upload/{name}", headers
 
-    from google.cloud import storage  # 遅延import
+    import google.auth  # 遅延import
+    from google.auth.transport.requests import Request
+    from google.cloud import storage
 
-    client = storage.Client(project=settings.gcp_project)
+    # Cloud Run の compute credentials は秘密鍵を持たないため、V4 署名は IAM SignBlob
+    # 経由にする（service_account_email + access_token を渡すと iamcredentials.signBlob
+    # で署名）。run SA に自己 roles/iam.serviceAccountTokenCreator が必要（§8 / iam.tf）。
+    credentials, _ = google.auth.default()
+    credentials.refresh(Request())
+
+    client = storage.Client(project=settings.gcp_project, credentials=credentials)
     blob = client.bucket(settings.gcs_bucket).blob(name)
     url = blob.generate_signed_url(
         version="v4",
         method="PUT",
         expiration=SIGNED_URL_TTL,
         content_type=content_type,
+        service_account_email=credentials.service_account_email,
+        access_token=credentials.token,
     )
     return url, headers
 
