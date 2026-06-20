@@ -1,19 +1,21 @@
 // 分析進捗・結果・エラーの表示（加藤）。job のステータスから表示を導出する。
 // 設計根拠: Issue #8（React Router v7導入）、design_review_and_frontback.md §6.2, §6.3
 
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useInterviewJob } from "../hooks/useInterviewJob";
 import { AnalysisProgress } from "../components/AnalysisProgress";
-import { Dashboard } from "../components/Dashboard";
+import { ResultPage } from "../components/ResultPage";
 
 export function JobPage() {
   const { jobId = "" } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { job } = useInterviewJob(jobId);
   const reset = () => navigate("/");
 
   if (job?.status === "completed" && job.result) {
-    return <Dashboard result={job.result} onReset={reset} />;
+    const initialTab = searchParams.get("tab") === "video" ? "video" : "score";
+    return <ResultPage result={job.result} onReset={reset} initialTab={initialTab} />;
   }
 
   if (job?.status === "failed") {
