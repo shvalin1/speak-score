@@ -8,7 +8,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { listInterviews } from "../services/api";
+import { intervalMs } from "../hooks/useInterviewJob";
 import type { InterviewSummary, JobStatus } from "../types/interview";
+
+const isPending = (item: InterviewSummary) =>
+  item.status === "processing" || item.status === "awaiting_upload";
 
 type StatusStyle = {
   label: string;
@@ -36,10 +40,30 @@ export function HistoryPage() {
   const navigate = useNavigate();
   const [items, setItems] = useState<InterviewSummary[]>([]);
 
+  // processing/awaiting_uploadの項目が残っている間は、完了/失敗に変わるまで定期的に再取得する。
   useEffect(() => {
-    listInterviews()
-      .then(setItems)
-      .catch((err) => console.error("履歴一覧の取得に失敗しました", err));
+    let cancelled = false;
+    let timer: number | undefined;
+
+    const tick = async () => {
+      try {
+        const list = await listInterviews();
+        if (cancelled) return;
+        setItems(list);
+        if (list.some(isPending)) {
+          timer = window.setTimeout(tick, intervalMs);
+        }
+      } catch (err) {
+        console.error("履歴一覧の取得に失敗しました", err);
+        if (!cancelled) timer = window.setTimeout(tick, intervalMs);
+      }
+    };
+    tick();
+
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
   }, []);
 
   // 新しいものを上に（created_at 降順）。

@@ -7,8 +7,8 @@ import type { InterviewJob } from "../types/interview";
 import { getInterview } from "../services/api";
 
 const POLL_INTERVAL_MS = 5000;
-// モック開発は短縮（VITE_USE_MOCK時のみ）。
-const intervalMs = import.meta.env.VITE_USE_MOCK === "1" ? 1000 : POLL_INTERVAL_MS;
+// モック開発は短縮（VITE_USE_MOCK時のみ）。HistoryPageの定期更新でも同じ間隔を使う。
+export const intervalMs = import.meta.env.VITE_USE_MOCK === "1" ? 1000 : POLL_INTERVAL_MS;
 
 export interface UseInterviewJob {
   job: InterviewJob | null;

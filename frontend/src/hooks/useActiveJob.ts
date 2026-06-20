@@ -7,6 +7,8 @@ import { createContext, useContext, useState } from "react";
 import { useInterviewJob } from "./useInterviewJob";
 import type { InterviewJob } from "../types/interview";
 
+const STORAGE_KEY = "speakscore:activeJobId";
+
 export interface ActiveJobContextValue {
   activeJobId: string | null;
   job: InterviewJob | null;
@@ -15,10 +17,27 @@ export interface ActiveJobContextValue {
 
 export const ActiveJobContext = createContext<ActiveJobContextValue | null>(null);
 
-/** ActiveJobProvider からのみ呼ぶ。 */
+/**
+ * ActiveJobProvider からのみ呼ぶ。
+ * リロードで処理中ジョブの追跡を失わないよう、sessionStorageにも書く
+ * （タブを閉じたら消える＝今のセッション限定。本番ではサーバー側のジョブ自体は
+ * 残るので/historyからも追えるが、ショートカット表示はリロードしても保つ）。
+ */
 export function useProvideActiveJob(): ActiveJobContextValue {
-  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [activeJobId, setActiveJobIdState] = useState<string | null>(() =>
+    sessionStorage.getItem(STORAGE_KEY),
+  );
   const { job } = useInterviewJob(activeJobId);
+
+  const setActiveJobId = (jobId: string | null) => {
+    if (jobId) {
+      sessionStorage.setItem(STORAGE_KEY, jobId);
+    } else {
+      sessionStorage.removeItem(STORAGE_KEY);
+    }
+    setActiveJobIdState(jobId);
+  };
+
   return { activeJobId, job, setActiveJobId };
 }
 
