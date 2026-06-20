@@ -1,6 +1,5 @@
 // 過去の分析履歴一覧（加藤）。
-// 設計根拠: GitHub Issue #7
-// TODO(加藤): 完了済みエントリ→詳細（Dashboard）への遷移は、ルーティング実装後（#8）に結線する。
+// 設計根拠: GitHub Issue #7・#8（onSelectはHomePageから/jobs/:jobIdへのnavigateに結線）
 
 import { Inbox } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
