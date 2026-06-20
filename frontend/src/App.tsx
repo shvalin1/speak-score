@@ -4,21 +4,21 @@
 
 import { Route, Routes } from "react-router-dom";
 import { AuthGate } from "./components/AuthGate";
+import { AppHeader } from "./components/AppHeader";
 import { HomePage } from "./pages/HomePage";
+import { HistoryPage } from "./pages/HistoryPage";
 import { JobPage } from "./pages/JobPage";
 import "./App.css";
 
 export default function App() {
   return (
     <AuthGate>
-      <header className="app-header">
-        <h1>SpeakScore</h1>
-        <p className="tagline">運に頼らず、実力で内定を掴む</p>
-      </header>
+      <AppHeader />
 
       <main className="app-main">
         <Routes>
           <Route path="/" element={<HomePage />} />
+          <Route path="/history" element={<HistoryPage />} />
           <Route path="/jobs/:jobId" element={<JobPage />} />
         </Routes>
       </main>

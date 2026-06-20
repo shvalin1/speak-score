@@ -14,19 +14,6 @@ body {
   color: var(--text);
 }
 
-.app-header {
-  text-align: center;
-  padding: 24px 16px 8px;
-}
-.app-header h1 {
-  margin: 0;
-  font-size: 2rem;
-}
-.tagline {
-  color: #94a3b8;
-  margin: 4px 0 0;
-}
-
 .app-main {
   max-width: 880px;
   margin: 0 auto;
