@@ -21,7 +21,9 @@ export default function App() {
 
   // 履歴一覧は初回表示時、および job のステータスが変わるたび（完了時など）に取り直す。
   useEffect(() => {
-    listInterviews().then(setHistory).catch(() => {});
+    listInterviews()
+      .then(setHistory)
+      .catch((err) => console.error("履歴一覧の取得に失敗しました", err));
   }, [job?.status]);
 
   const handleUpload = async (file: File) => {
