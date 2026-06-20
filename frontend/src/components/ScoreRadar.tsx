@@ -9,6 +9,7 @@ import {
   PolarRadiusAxis,
   ResponsiveContainer,
 } from "recharts";
+import { Card, CardContent } from "@/components/ui/card";
 import type { Dimensions } from "../types/interview";
 
 export function ScoreRadar({ dimensions }: { dimensions: Dimensions }) {
@@ -19,15 +20,17 @@ export function ScoreRadar({ dimensions }: { dimensions: Dimensions }) {
     { axis: "自信", score: dimensions.confidence.score },
   ];
   return (
-    <div className="score-radar">
-      <ResponsiveContainer width="100%" height={260}>
-        <RadarChart data={data}>
-          <PolarGrid />
-          <PolarAngleAxis dataKey="axis" />
-          <PolarRadiusAxis domain={[0, 100]} />
-          <Radar dataKey="score" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.5} />
-        </RadarChart>
-      </ResponsiveContainer>
-    </div>
+    <Card>
+      <CardContent>
+        <ResponsiveContainer width="100%" height={260}>
+          <RadarChart data={data}>
+            <PolarGrid />
+            <PolarAngleAxis dataKey="axis" />
+            <PolarRadiusAxis domain={[0, 100]} />
+            <Radar dataKey="score" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.5} />
+          </RadarChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
   );
 }

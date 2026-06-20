@@ -2,6 +2,7 @@
 // fillers の start_char/end_char で full_text を分割して色付け。
 // 設計根拠: design_review_and_frontback.md §6.3
 
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Transcript } from "../types/interview";
 
 export function TranscriptView({ transcript }: { transcript: Transcript }) {
@@ -23,19 +24,26 @@ export function TranscriptView({ transcript }: { transcript: Transcript }) {
   }
 
   return (
-    <div className="transcript-view">
-      <h3>文字起こし</h3>
-      <p className="transcript-body">
-        {parts.map((p, i) =>
-          p.filler ? (
-            <mark key={i} className="filler">
-              {p.text}
-            </mark>
-          ) : (
-            <span key={i}>{p.text}</span>
-          ),
-        )}
-      </p>
-    </div>
+    <Card>
+      <CardHeader>
+        <CardTitle>文字起こし</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm leading-relaxed whitespace-pre-wrap">
+          {parts.map((p, i) =>
+            p.filler ? (
+              <mark
+                key={i}
+                className="rounded bg-amber-300/80 px-0.5 text-slate-900"
+              >
+                {p.text}
+              </mark>
+            ) : (
+              <span key={i}>{p.text}</span>
+            ),
+          )}
+        </p>
+      </CardContent>
+    </Card>
   );
 }

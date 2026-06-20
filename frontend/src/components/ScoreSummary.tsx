@@ -2,6 +2,9 @@
 // 設計根拠: design_review_and_frontback.md §6.3
 
 import type { AnalysisResult, Dimension } from "../types/interview";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 const LABELS: Record<keyof AnalysisResult["dimensions"], string> = {
   content: "内容",
@@ -13,28 +16,41 @@ const LABELS: Record<keyof AnalysisResult["dimensions"], string> = {
 export function ScoreSummary({ result }: { result: AnalysisResult }) {
   const dims = result.dimensions;
   return (
-    <div className="score-summary">
-      <div className="overall">
-        <span className="overall-value">{result.overall_score}</span>
-        <span className="overall-unit">/ 100</span>
-      </div>
-      <ul className="dim-list">
-        {(Object.keys(dims) as (keyof typeof dims)[]).map((k) => (
-          <li key={k}>
-            <span className="dim-label">{LABELS[k]}</span>
-            <span className="dim-score">{dims[k].score}</span>
-            <SourceBadge source={dims[k].source} />
-          </li>
-        ))}
-      </ul>
-    </div>
+    <Card>
+      <CardContent className="flex flex-col gap-6">
+        <div className="flex items-baseline justify-center gap-1">
+          <span className="text-5xl font-extrabold text-primary">
+            {result.overall_score}
+          </span>
+          <span className="text-lg text-muted-foreground">/ 100</span>
+        </div>
+
+        <ul className="flex flex-col gap-2">
+          {(Object.keys(dims) as (keyof typeof dims)[]).map((k) => (
+            <li key={k} className="flex items-center gap-3">
+              <span className="w-12 text-sm text-muted-foreground">{LABELS[k]}</span>
+              <span className="text-base font-semibold">{dims[k].score}</span>
+              <SourceBadge source={dims[k].source} />
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
   );
 }
 
 function SourceBadge({ source }: { source: Dimension["source"] }) {
   return (
-    <span className={`source-badge ${source}`}>
+    <Badge
+      variant="secondary"
+      className={cn(
+        "ml-auto",
+        source === "computed"
+          ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+          : "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400",
+      )}
+    >
       {source === "computed" ? "音声解析" : "AI採点"}
-    </span>
+    </Badge>
   );
 }
