@@ -5,15 +5,8 @@
 import { useState, useEffect } from "react";
 import { Circle, CircleCheck, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { InterviewJob, ProcessingStage } from "../types/interview";
-
-const STAGES: { key: ProcessingStage | "queued"; label: string }[] = [
-  { key: "queued", label: "待機中" },
-  { key: "extracting_audio", label: "音声を抽出中" },
-  { key: "transcribing", label: "文字起こし中" },
-  { key: "analyzing_audio", label: "音声を分析中" },
-  { key: "evaluating", label: "AIが評価中" },
-];
+import { STAGES } from "@/lib/processingStages";
+import type { InterviewJob } from "../types/interview";
 
 export function AnalysisProgress({ job }: { job: InterviewJob | null }) {
   const [isReady, setIsReady] = useState(false);

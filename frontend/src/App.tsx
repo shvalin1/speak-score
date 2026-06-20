@@ -5,6 +5,7 @@
 import { Route, Routes } from "react-router-dom";
 import { AuthGate } from "./components/AuthGate";
 import { AppHeader } from "./components/AppHeader";
+import { FloatingProgressWidget } from "./components/FloatingProgressWidget";
 import { HomePage } from "./pages/HomePage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { JobPage } from "./pages/JobPage";
@@ -22,6 +23,8 @@ export default function App() {
           <Route path="/jobs/:jobId" element={<JobPage />} />
         </Routes>
       </main>
+
+      <FloatingProgressWidget />
     </AuthGate>
   );
 }
