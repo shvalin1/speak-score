@@ -83,22 +83,22 @@ export function HistoryPage() {
       </CardHeader>
       <CardContent>
         {isLoading ? (
-          <div className="overflow-hidden rounded-xl border border-border">
-            <div className="grid grid-cols-[150px_130px_110px_1fr] items-center gap-3 border-b border-border bg-muted/50 px-4 py-2.5 text-xs font-semibold tracking-wide text-muted-foreground">
-              <span>日時</span>
-              <span>総合スコア</span>
-              <span>ステータス</span>
-              <span className="text-right">操作</span>
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <div className="grid grid-cols-[150px_110px_110px_minmax(180px,1fr)] min-w-[600px] items-center gap-3 border-b border-border bg-muted/50 px-4 py-2.5 text-xs font-semibold tracking-wide text-muted-foreground">
+              <span className="pl-4">日時</span>
+              <span className="text-center">総合スコア</span>
+              <span className="text-center">ステータス</span>
+              <span className="pr-2 text-center">操作</span>
             </div>
             {[0, 1, 2].map((i) => (
               <div
                 key={i}
-                className="grid grid-cols-[150px_130px_110px_1fr] items-center gap-3 border-b border-border/60 px-4 py-3.5 last:border-b-0"
+                className="grid grid-cols-[150px_110px_110px_minmax(180px,1fr)] min-w-[600px] items-center gap-3 border-b border-border/60 px-4 py-3.5 last:border-b-0"
               >
                 <Skeleton className="h-4 w-20" />
-                <Skeleton className="h-4 w-14" />
-                <Skeleton className="h-5 w-16 rounded-full" />
-                <div className="flex justify-end gap-2">
+                <Skeleton className="mx-auto h-4 w-14" />
+                <Skeleton className="mx-auto h-5 w-16 rounded-full" />
+                <div className="flex justify-center gap-2 pr-2">
                   <Skeleton className="h-7 w-20" />
                   <Skeleton className="h-7 w-20" />
                 </div>
@@ -111,13 +111,13 @@ export function HistoryPage() {
             まだ分析履歴がありません
           </div>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-border">
+          <div className="overflow-x-auto rounded-xl border border-border">
             {/* ヘッダ行 */}
-            <div className="grid grid-cols-[150px_130px_110px_1fr] items-center gap-3 border-b border-border bg-muted/50 px-4 py-2.5 text-xs font-semibold tracking-wide text-muted-foreground">
-              <span>日時</span>
-              <span>総合スコア</span>
-              <span>ステータス</span>
-              <span className="text-right">操作</span>
+            <div className="grid grid-cols-[150px_110px_110px_minmax(180px,1fr)] min-w-[600px] items-center gap-3 border-b border-border bg-muted/50 px-4 py-2.5 text-xs font-semibold tracking-wide text-muted-foreground">
+              <span className="pl-4">日時</span>
+              <span className="text-center">総合スコア</span>
+              <span className="text-center">ステータス</span>
+              <span className="pr-2 text-center">操作</span>
             </div>
 
             {/* データ行 */}
@@ -127,9 +127,9 @@ export function HistoryPage() {
               return (
                 <div
                   key={item.job_id}
-                  className="grid grid-cols-[150px_130px_110px_1fr] items-center gap-3 border-b border-border/60 px-4 py-3.5 text-sm last:border-b-0"
+                  className="grid grid-cols-[150px_110px_110px_minmax(180px,1fr)] min-w-[600px] items-center gap-3 border-b border-border/60 px-4 py-3.5 text-sm last:border-b-0"
                 >
-                  <span className="text-muted-foreground">
+                  <span className="pl-4 text-muted-foreground">
                     {new Date(item.created_at).toLocaleString("ja-JP", {
                       month: "numeric",
                       day: "numeric",
@@ -138,17 +138,17 @@ export function HistoryPage() {
                     })}
                   </span>
 
-                  <span className="text-[15px] font-bold">
+                  <span className="text-center text-[15px] font-bold">
                     {item.overall_score !== null ? `${item.overall_score} / 100` : "—"}
                   </span>
 
-                  <span>
+                  <span className="flex justify-center">
                     <Badge variant={st.variant} className={st.className}>
                       {st.label}
                     </Badge>
                   </span>
 
-                  <div className="flex justify-end gap-2">
+                  <div className="flex justify-center gap-2 pr-2">
                     {completed ? (
                       <>
                         <Button

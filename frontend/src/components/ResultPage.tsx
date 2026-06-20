@@ -130,7 +130,7 @@ function VideoTab({ result, videoUrl }: { result: AnalysisResult; videoUrl?: str
   };
 
   return (
-    <div className="grid grid-cols-[1.25fr_1fr] items-start gap-4">
+    <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[1.1fr_1fr]">
       {/* 左: 動画 + サマリ指標 */}
       <div className="flex flex-col gap-3">
         <div className="aspect-video overflow-hidden rounded-xl bg-black ring-1 ring-foreground/10">
