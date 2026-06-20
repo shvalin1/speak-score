@@ -7,6 +7,7 @@ import type {
   CreateInterviewResponse,
   InterviewJob,
   InterviewSummary,
+  JobStatus,
   ProcessingStage,
   StartResponse,
 } from "../types/interview";
@@ -119,6 +120,7 @@ interface MockJob {
   job_id: string;
   created_at: string;
   startedAt: number; // /start を押した時刻（performance.now基準）
+  shouldFail: boolean; // テスト用: ファイル名に "fail" を含めると失敗扱いにする（Issue #9）
 }
 
 // 本物のFirestoreはリロードしても消えないが、Mapだけだとブラウザのメモリ上に
@@ -162,7 +164,7 @@ const STAGE_TIMELINE: { until: number; stage: ProcessingStage | null }[] = [
 const MOCK_TOTAL_MS = 10000;
 
 async function mockUploadInterview(
-  _file: File,
+  file: File,
   onProgress?: (pct: number) => void,
 ): Promise<string> {
   // アップロード進捗を擬似的に進める
@@ -175,6 +177,7 @@ async function mockUploadInterview(
     job_id,
     created_at: new Date().toISOString(),
     startedAt: Date.now(),
+    shouldFail: file.name.toLowerCase().includes("fail"),
   });
   saveMockJobs();
   return job_id;
@@ -187,6 +190,17 @@ async function mockGetInterview(jobId: string): Promise<InterviewJob> {
   const elapsed = Date.now() - job.startedAt;
 
   if (elapsed >= MOCK_TOTAL_MS) {
+    if (job.shouldFail) {
+      return {
+        job_id: jobId,
+        status: "failed",
+        stage: null,
+        created_at: job.created_at,
+        completed_at: new Date().toISOString(),
+        error: 'mock: simulated server error (filename contained "fail")',
+        result: null,
+      };
+    }
     return {
       job_id: jobId,
       status: "completed",
@@ -215,10 +229,14 @@ async function mockGetInterview(jobId: string): Promise<InterviewJob> {
 
 async function mockListInterviews(): Promise<InterviewSummary[]> {
   await sleep(150);
-  return [...mockJobs.values()].map((j) => ({
-    job_id: j.job_id,
-    created_at: j.created_at,
-    overall_score: Date.now() - j.startedAt >= MOCK_TOTAL_MS ? sampleResult.overall_score : null,
-    status: Date.now() - j.startedAt >= MOCK_TOTAL_MS ? "completed" : "processing",
-  }));
+  return [...mockJobs.values()].map((j) => {
+    const done = Date.now() - j.startedAt >= MOCK_TOTAL_MS;
+    const status: JobStatus = done ? (j.shouldFail ? "failed" : "completed") : "processing";
+    return {
+      job_id: j.job_id,
+      created_at: j.created_at,
+      overall_score: status === "completed" ? sampleResult.overall_score : null,
+      status,
+    };
+  });
 }
