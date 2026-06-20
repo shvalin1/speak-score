@@ -18,9 +18,10 @@ export function AppHeader() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { signOut } = useAuth();
+  // /jobs/:jobId（分析中・結果・エラー画面）は履歴から辿る導線なので「履歴」扱いにする。
   const active: HeaderTab | null = pathname === "/"
     ? "home"
-    : pathname.startsWith("/history")
+    : pathname.startsWith("/history") || pathname.startsWith("/jobs/")
       ? "history"
       : null;
 
