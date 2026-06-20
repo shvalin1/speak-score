@@ -48,3 +48,14 @@ variable "worker_url" {
   EOT
   default     = ""
 }
+
+variable "auth_disabled" {
+  type        = bool
+  description = <<-EOT
+    backend のユーザーAPI(Firebase)認証を無効化し dev_uid で叩けるようにする。
+    Step1b の実機検証窓だけ true（curl で一周するため）。worker の OIDC は別フラグ
+    (worker_oidc_disabled)で制御され、これとは独立に常に有効(fail-closed)。
+    検証完了後は false に戻して再 apply すること（design 手順書 §5）。
+  EOT
+  default     = false
+}

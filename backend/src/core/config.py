@@ -22,8 +22,11 @@ class Settings(BaseSettings):
 
     # --- Auth (Firebase) ---
     firebase_project: str = ""
-    # ローカル/モック開発で Firebase 検証を無効化し dev uid を返す
+    # ローカル/モック開発で Firebase 検証を無効化し dev uid を返す（ユーザーAPIのみ）
     auth_disabled: bool = False
+    # worker(/tasks/process) の OIDC 検証を無効化するか。既定 False=本番で常に必須(fail-closed)。
+    # auth_disabled とは独立。ローカル同期経路(core/tasks.py 直叩き)では .env で 1 にする。
+    worker_oidc_disabled: bool = False
     dev_uid: str = "dev-user"
 
     # --- LLM ---

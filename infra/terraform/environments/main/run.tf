@@ -63,6 +63,15 @@ resource "google_cloud_run_v2_service" "backend" {
         name  = "FIREBASE_PROJECT"
         value = var.project_id
       }
+      # Step1b 実機検証窓のみ true。ユーザーAPIを dev_uid で叩けるようにする。
+      # worker の OIDC は worker_oidc_disabled(既定 False)で別管理＝常に必須(fail-closed)。
+      dynamic "env" {
+        for_each = var.auth_disabled ? [1] : []
+        content {
+          name  = "AUTH_DISABLED"
+          value = "1"
+        }
+      }
     }
   }
 

@@ -34,10 +34,10 @@ def _verify_oidc(request: Request, settings: Settings) -> None:
 
     backend は public のため、worker エンドポイントの防御はこのアプリ内検証が唯一（§9）。
     Cloud Tasks が tasks_invoker SA で発行した ID トークンを、audience(=worker_url)と
-    発行者メール(=worker_sa)で照合する。ローカルは AUTH_DISABLED で素通り。
+    発行者メール(=worker_sa)で照合する。ローカルは WORKER_OIDC_DISABLED で素通り。
     """
-    if settings.auth_disabled:
-        return  # ローカルは検証スキップ
+    if settings.worker_oidc_disabled:
+        return  # ローカル同期経路のみ検証スキップ（既定 False=本番は常に必須）
 
     from fastapi import HTTPException
 

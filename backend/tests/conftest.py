@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 def _local_env(monkeypatch):
     # ローカル/テストは認証無効・in-memoryストア
     monkeypatch.setenv("AUTH_DISABLED", "1")
+    monkeypatch.setenv("WORKER_OIDC_DISABLED", "1")
     monkeypatch.setenv("TASKS_QUEUE", "")
     monkeypatch.setenv("GCS_BUCKET", "")
     monkeypatch.setenv("GCP_PROJECT", "")
