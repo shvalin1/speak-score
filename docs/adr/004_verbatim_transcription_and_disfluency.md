@@ -23,7 +23,7 @@
   BERT 系列ラベリングの自己ホストは保守コスト高で非推奨。
 - **指標の注意**: 話速 CPM（文字/分）は漢字/かな比でブレる参考値。分母の頑健化（モーラ/文節等）は Phase 5 で要検討。
 - **根拠/資産**: 実装計画 [docs/plans/002_step2_real_pipeline.md]、調査 `docs/research/step2_filler_annotation_research.md`、
-  ディープリサーチ用プロンプト `docs/research/step2_disfluency_deepresearch_prompt.md`、実験台 `experiments/disfluency/`
+  ディープリサーチ用プロンプト `docs/research/step2_disfluency_deepresearch_prompt.md`、実験台 `experiments/evaluation/`
   （`transcribe.py --prompt` / `audio_metrics.py` / `run_chain.py`）。
 
 [ADR 003]: ./003_scoring_split.md
