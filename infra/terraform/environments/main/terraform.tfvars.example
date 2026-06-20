@@ -1,0 +1,13 @@
+# cp terraform.tfvars.example terraform.tfvars して値を埋める。
+project_id = "speak-score-xxxxx"
+region     = "us-central1"
+
+# フロント確定後、frontend の Cloud Run URL に絞る（初期は緩めの "*"）。
+cors_origins = ["*"]
+
+# CI 整備までプレースホルダのまま（apply は通る）。
+# backend_image  = "us-central1-docker.pkg.dev/speak-score-xxxxx/speak-score/backend:latest"
+# frontend_image = "us-central1-docker.pkg.dev/speak-score-xxxxx/speak-score/frontend:latest"
+
+# 初回 apply 後に backend_url を入れて再 apply。
+# worker_url = "https://speak-score-backend-xxxxxxxx-uc.a.run.app"
