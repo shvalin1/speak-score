@@ -121,7 +121,37 @@ interface MockJob {
   startedAt: number; // /start を押した時刻（performance.now基準）
 }
 
-const mockJobs = new Map<string, MockJob>();
+// 本物のFirestoreはリロードしても消えないが、Mapだけだとブラウザのメモリ上に
+// しか無くリロードで消えてしまう。sessionStorageにも保存し、タブを閉じるまでは
+// 永続するようにして本番の挙動に近づける（startedAtは実時刻なので、復元後も
+// 経過時間から進捗が正しく再計算される）。
+const MOCK_JOBS_STORAGE_KEY = "speakscore:mockJobs";
+
+function loadMockJobs(): Map<string, MockJob> {
+  try {
+    const raw = sessionStorage.getItem(MOCK_JOBS_STORAGE_KEY);
+    return raw ? new Map(JSON.parse(raw) as [string, MockJob][]) : new Map();
+  } catch {
+    return new Map();
+  }
+}
+
+function saveMockJobs(): void {
+  sessionStorage.setItem(MOCK_JOBS_STORAGE_KEY, JSON.stringify([...mockJobs]));
+}
+
+const mockJobs = loadMockJobs();
+
+/**
+ * モックの履歴を全消去する。本物のFirebase認証ならログアウト→匿名再ログインで
+ * owner_uidが変わり履歴は自然に空になるが、モックは常に同じmock-uidを返すため
+ * 明示的にリセットしないとログアウト後も前のユーザーの履歴が残ってしまう。
+ * AuthGate がログアウトを検知したタイミングで呼ぶ。
+ */
+export function resetMockInterviews(): void {
+  mockJobs.clear();
+  sessionStorage.removeItem(MOCK_JOBS_STORAGE_KEY);
+}
 const STAGE_TIMELINE: { until: number; stage: ProcessingStage | null }[] = [
   { until: 1500, stage: null }, // queued（enqueue直後・worker未着手）
   { until: 3000, stage: "extracting_audio" },
@@ -146,6 +176,7 @@ async function mockUploadInterview(
     created_at: new Date().toISOString(),
     startedAt: Date.now(),
   });
+  saveMockJobs();
   return job_id;
 }
 
