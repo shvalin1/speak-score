@@ -190,38 +190,179 @@ class InMemoryJobRepo(JobRepository):
             return sorted(out, key=lambda s: s.created_at, reverse=True)
 
 
+COLLECTION = "interviews"
+
+
 class FirestoreJobRepo(JobRepository):
-    """本番ストア。TODO(石川/Step1b): Firestore transaction でリース/遷移を実装。"""
+    """本番ストア（Firestore Native）。
+
+    ドキュメント形は InMemoryJobRepo の dict を写したもの（collection=interviews / id=job_id）。
+    awaiting_upload→processing の一度きり遷移とリース取得は read-check-write を
+    @firestore.transactional で原子化し、二重 enqueue / 同時 worker を防ぐ（§5.1, §10）。
+
+    NOTE(石川/Step2): result はインライン保存。AnalysisResult が大きい動画で
+    Firestore の 1MiB ドキュメント上限に触れうる（audio timeline + transcript）。
+    実データ投入時に閾値超過分を GCS へオフロードする 1MiB 対策を入れる（§5.1, §10）。
+    """
 
     def __init__(self) -> None:
-        raise NotImplementedError(
-            "FirestoreJobRepo は Step1b（本番経路スパイク）で実装する。"
-            "ローカルは AUTH/Firestore 未設定なので InMemoryJobRepo を使う。"
+        from google.cloud import firestore  # 遅延import（重い & 本番経路のみ）
+
+        settings = get_settings()
+        self._fs = firestore.Client(project=settings.gcp_project or None)
+        self._col = self._fs.collection(COLLECTION)
+
+    def _ref(self, job_id: str):
+        return self._col.document(job_id)
+
+    def create(self, job_id: str, owner_uid: str, expire_at: datetime) -> None:
+        self._ref(job_id).set(
+            {
+                "job_id": job_id,
+                "owner_uid": owner_uid,
+                "status": JobStatus.awaiting_upload.value,
+                "stage": None,
+                "created_at": _now(),
+                "expire_at": expire_at,
+                "completed_at": None,
+                "error": None,
+                "result": None,
+                "lease_owner": None,
+                "lease_expires_at": None,
+                "attempt_count": 0,
+            }
         )
 
-    def create(self, job_id: str, owner_uid: str, expire_at: datetime) -> None: ...
-    def get(self, job_id: str) -> InterviewJob | None: ...
-    def get_owner(self, job_id: str) -> str | None: ...
-    def mark_processing(self, job_id: str) -> bool: ...
-    def try_acquire_lease(self, job_id: str, worker_id: str) -> bool: ...
-    def renew_lease(self, job_id: str, worker_id: str) -> None: ...
-    def release_lease(self, job_id: str) -> None: ...
-    def update_stage(self, job_id: str, stage: ProcessingStage) -> None: ...
-    def complete(self, job_id: str, result: AnalysisResult) -> None: ...
-    def fail(self, job_id: str, user_msg: str) -> None: ...
-    def list_for_owner(self, owner_uid: str) -> list[InterviewSummary]: ...
+    def _to_job(self, d: dict) -> InterviewJob:
+        result = d.get("result")
+        return InterviewJob(
+            job_id=d["job_id"],
+            status=JobStatus(d["status"]),
+            stage=ProcessingStage(d["stage"]) if d.get("stage") else None,
+            created_at=d["created_at"],
+            completed_at=d.get("completed_at"),
+            error=d.get("error"),
+            result=AnalysisResult.model_validate(result) if result else None,
+        )
+
+    def get(self, job_id: str) -> InterviewJob | None:
+        snap = self._ref(job_id).get()
+        return self._to_job(snap.to_dict()) if snap.exists else None
+
+    def get_owner(self, job_id: str) -> str | None:
+        snap = self._ref(job_id).get()
+        return snap.to_dict().get("owner_uid") if snap.exists else None
+
+    def mark_processing(self, job_id: str) -> bool:
+        from google.cloud import firestore
+
+        @firestore.transactional
+        def _txn(txn) -> bool:
+            ref = self._ref(job_id)
+            snap = ref.get(transaction=txn)
+            if not snap.exists or snap.get("status") != JobStatus.awaiting_upload.value:
+                return False
+            txn.update(ref, {"status": JobStatus.processing.value})
+            return True
+
+        return _txn(self._fs.transaction())
+
+    def try_acquire_lease(self, job_id: str, worker_id: str) -> bool:
+        from google.cloud import firestore
+
+        @firestore.transactional
+        def _txn(txn) -> bool:
+            ref = self._ref(job_id)
+            snap = ref.get(transaction=txn)
+            if not snap.exists or snap.get("status") != JobStatus.processing.value:
+                return False
+            lease = snap.get("lease_expires_at")
+            if lease is not None and lease > _now():
+                return False  # 別 worker が処理中
+            txn.update(
+                ref,
+                {
+                    "lease_owner": worker_id,
+                    "lease_expires_at": _now() + LEASE_DURATION,
+                    "attempt_count": (snap.get("attempt_count") or 0) + 1,
+                    "stage": ProcessingStage.extracting_audio.value,
+                },
+            )
+            return True
+
+        return _txn(self._fs.transaction())
+
+    def renew_lease(self, job_id: str, worker_id: str) -> None:
+        from google.cloud import firestore
+
+        @firestore.transactional
+        def _txn(txn) -> None:
+            ref = self._ref(job_id)
+            snap = ref.get(transaction=txn)
+            if snap.exists and snap.get("lease_owner") == worker_id:
+                txn.update(ref, {"lease_expires_at": _now() + LEASE_DURATION})
+
+        _txn(self._fs.transaction())
+
+    def release_lease(self, job_id: str) -> None:
+        self._ref(job_id).update({"lease_owner": None, "lease_expires_at": None})
+
+    def update_stage(self, job_id: str, stage: ProcessingStage) -> None:
+        self._ref(job_id).update({"stage": stage.value})
+
+    def complete(self, job_id: str, result: AnalysisResult) -> None:
+        self._ref(job_id).update(
+            {
+                "status": JobStatus.completed.value,
+                "stage": None,
+                "result": result.model_dump(mode="json"),
+                "completed_at": _now(),
+                "lease_owner": None,
+                "lease_expires_at": None,
+            }
+        )
+
+    def fail(self, job_id: str, user_msg: str) -> None:
+        self._ref(job_id).update(
+            {
+                "status": JobStatus.failed.value,
+                "error": user_msg,
+                "lease_owner": None,
+                "lease_expires_at": None,
+            }
+        )
+
+    def list_for_owner(self, owner_uid: str) -> list[InterviewSummary]:
+        from google.cloud.firestore_v1 import FieldFilter
+
+        # owner_uid 等価フィルタのみ（created_at の並べ替えは Python 側で行い複合インデックス不要）
+        docs = self._col.where(filter=FieldFilter("owner_uid", "==", owner_uid)).stream()
+        out: list[InterviewSummary] = []
+        for snap in docs:
+            d = snap.to_dict()
+            result = d.get("result")
+            out.append(
+                InterviewSummary(
+                    job_id=d["job_id"],
+                    created_at=d["created_at"],
+                    overall_score=result["overall_score"] if result else None,
+                    status=JobStatus(d["status"]),
+                )
+            )
+        return sorted(out, key=lambda s: s.created_at, reverse=True)
 
 
 _repo: JobRepository | None = None
 
 
 def get_job_repo() -> JobRepository:
-    """設定に応じてストアを選択。Firestore未設定ならローカル in-memory。"""
+    """設定に応じてストアを選択。
+
+    gcp_project が設定済みなら Firestore（FIRESTORE_EMULATOR_HOST があれば
+    firestore.Client が自動でエミュレータに接続する）。未設定ならローカル in-memory。
+    """
     global _repo
     if _repo is None:
         settings = get_settings()
-        if settings.gcp_project and not settings.firestore_emulator_host:
-            _repo = FirestoreJobRepo()
-        else:
-            _repo = InMemoryJobRepo()
+        _repo = FirestoreJobRepo() if settings.gcp_project else InMemoryJobRepo()
     return _repo
