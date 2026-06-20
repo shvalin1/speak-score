@@ -33,11 +33,11 @@ def _future() -> datetime:
     return datetime.now(UTC) + timedelta(days=1)
 
 
-def _make_firestore_repo() -> JobRepository:
+def _make_firestore_repo(monkeypatch) -> JobRepository:
     if not os.environ.get("FIRESTORE_EMULATOR_HOST"):
         pytest.skip("FIRESTORE_EMULATOR_HOST 未設定（エミュレータ未起動）")
-    # conftest の autouse fixture が GCP_PROJECT="" を入れるため直接上書きする
-    os.environ["GCP_PROJECT"] = "speakscore-test"
+    # conftest の autouse fixture が GCP_PROJECT="" を入れるため上書き（teardown で戻る）
+    monkeypatch.setenv("GCP_PROJECT", "speakscore-test")
     from src.core.config import get_settings
     from src.repositories.job_repo import FirestoreJobRepo
 
@@ -46,10 +46,10 @@ def _make_firestore_repo() -> JobRepository:
 
 
 @pytest.fixture(params=["inmemory", "firestore"])
-def repo(request) -> JobRepository:
+def repo(request, monkeypatch) -> JobRepository:
     if request.param == "inmemory":
         return InMemoryJobRepo()
-    return _make_firestore_repo()
+    return _make_firestore_repo(monkeypatch)
 
 
 def test_create_and_get(repo: JobRepository) -> None:
@@ -134,6 +134,33 @@ def test_fail_sets_user_message(repo: JobRepository) -> None:
     job = repo.get(jid)
     assert job.status == JobStatus.failed
     assert job.error == "処理に失敗しました。"
+
+
+def test_release_lease_allows_reacquire(repo: JobRepository) -> None:
+    jid = uuid.uuid4().hex
+    repo.create(jid, owner_uid="u1", expire_at=_future())
+    repo.mark_processing(jid)
+
+    assert repo.try_acquire_lease(jid, "worker-a") is True
+    assert repo.try_acquire_lease(jid, "worker-b") is False  # 保持中
+    repo.release_lease(jid)
+    # 解放後は別 worker が再取得できる
+    assert repo.try_acquire_lease(jid, "worker-b") is True
+
+
+def test_lease_reacquire_after_expiry(repo: JobRepository, monkeypatch) -> None:
+    # リース期間を負にして即失効させ、failover（別workerの再取得）を検証する。
+    from src.repositories import job_repo as jr
+
+    monkeypatch.setattr(jr, "LEASE_DURATION", timedelta(seconds=-1))
+    jid = uuid.uuid4().hex
+    repo.create(jid, owner_uid="u1", expire_at=_future())
+    repo.mark_processing(jid)
+
+    assert repo.try_acquire_lease(jid, "worker-a") is True  # 取得直後に失効するリース
+    # 失効済みなので別 worker が奪取できる（worker クラッシュ時の復帰経路）
+    assert repo.try_acquire_lease(jid, "worker-b") is True
+    assert repo.get(jid).stage == ProcessingStage.extracting_audio
 
 
 def test_list_is_owner_scoped_and_sorted(repo: JobRepository) -> None:

@@ -29,6 +29,14 @@ def enqueue_process(job_id: str) -> None:
         return
 
     # --- 本番: Cloud Tasks ---
+    if not settings.worker_url:
+        # 2パス apply の2パス目（worker_url 注入）を忘れると url が相対になり
+        # create_task が失敗する。黙って壊れるより明示エラーで気付かせる。
+        raise RuntimeError(
+            "WORKER_URL 未設定: Cloud Tasks 有効時は backend の公開URLが必須"
+            "（terraform の worker_url を入れて再 apply する）"
+        )
+
     from google.cloud import tasks_v2  # 遅延import
 
     client = tasks_v2.CloudTasksClient()

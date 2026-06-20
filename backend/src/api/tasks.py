@@ -30,15 +30,36 @@ class RecoverableError(Exception):
 
 
 def _verify_oidc(request: Request, settings: Settings) -> None:
-    """Cloud Tasks の OIDC トークンを検証（発行SA・audience一致）。
+    """Cloud Tasks の OIDC トークンを検証（Google署名・audience・発行SA一致）。
 
-    NOTE(石川/Step1b): 本番経路スパイクで Google の oauth2 トークン検証を実装する。
-    backend は public のため、worker防御はこのアプリ内検証が唯一（§9）。
+    backend は public のため、worker エンドポイントの防御はこのアプリ内検証が唯一（§9）。
+    Cloud Tasks が tasks_invoker SA で発行した ID トークンを、audience(=worker_url)と
+    発行者メール(=worker_sa)で照合する。ローカルは AUTH_DISABLED で素通り。
     """
     if settings.auth_disabled:
         return  # ローカルは検証スキップ
-    # TODO: from google.oauth2 import id_token; id_token.verify_oauth2_token(...)
-    return
+
+    from fastapi import HTTPException
+
+    auth = request.headers.get("authorization", "")
+    if not auth.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="missing oidc token")
+    token = auth.split(" ", 1)[1].strip()
+
+    from google.auth.transport import requests as google_requests
+    from google.oauth2 import id_token
+
+    audience = settings.worker_audience or settings.worker_url
+    try:
+        claims = id_token.verify_oauth2_token(token, google_requests.Request(), audience=audience)
+    except Exception as e:  # noqa: BLE001 署名/期限/audience 不一致は全て 401 に倒す
+        raise HTTPException(status_code=401, detail="invalid oidc token") from e
+
+    if not claims.get("email_verified", False):
+        raise HTTPException(status_code=403, detail="oidc email not verified")
+    # tasks_invoker 以外の主体からの呼び出しを拒否（worker_sa 設定時のみ）。
+    if settings.worker_sa and claims.get("email") != settings.worker_sa:
+        raise HTTPException(status_code=403, detail="unexpected oidc principal")
 
 
 @router.post("/tasks/process")

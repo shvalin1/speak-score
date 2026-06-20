@@ -209,11 +209,23 @@ class FirestoreJobRepo(JobRepository):
         from google.cloud import firestore  # 遅延import（重い & 本番経路のみ）
 
         settings = get_settings()
-        self._fs = firestore.Client(project=settings.gcp_project or None)
+        self._fs = firestore.Client(project=settings.gcp_project)
         self._col = self._fs.collection(COLLECTION)
 
     def _ref(self, job_id: str):
         return self._col.document(job_id)
+
+    def _safe_update(self, job_id: str, fields: dict) -> None:
+        """doc 不在時は no-op（InMemoryJobRepo の `if d:` ガードと契約を揃える）。
+
+        TTL 削除直後の遅延タスク等で対象が消えていても NotFound を投げない。
+        """
+        from google.api_core.exceptions import NotFound
+
+        try:
+            self._ref(job_id).update(fields)
+        except NotFound:
+            pass
 
     def create(self, job_id: str, owner_uid: str, expire_at: datetime) -> None:
         self._ref(job_id).set(
@@ -305,13 +317,14 @@ class FirestoreJobRepo(JobRepository):
         _txn(self._fs.transaction())
 
     def release_lease(self, job_id: str) -> None:
-        self._ref(job_id).update({"lease_owner": None, "lease_expires_at": None})
+        self._safe_update(job_id, {"lease_owner": None, "lease_expires_at": None})
 
     def update_stage(self, job_id: str, stage: ProcessingStage) -> None:
-        self._ref(job_id).update({"stage": stage.value})
+        self._safe_update(job_id, {"stage": stage.value})
 
     def complete(self, job_id: str, result: AnalysisResult) -> None:
-        self._ref(job_id).update(
+        self._safe_update(
+            job_id,
             {
                 "status": JobStatus.completed.value,
                 "stage": None,
@@ -319,17 +332,18 @@ class FirestoreJobRepo(JobRepository):
                 "completed_at": _now(),
                 "lease_owner": None,
                 "lease_expires_at": None,
-            }
+            },
         )
 
     def fail(self, job_id: str, user_msg: str) -> None:
-        self._ref(job_id).update(
+        self._safe_update(
+            job_id,
             {
                 "status": JobStatus.failed.value,
                 "error": user_msg,
                 "lease_owner": None,
                 "lease_expires_at": None,
-            }
+            },
         )
 
     def list_for_owner(self, owner_uid: str) -> list[InterviewSummary]:
