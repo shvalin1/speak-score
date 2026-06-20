@@ -137,10 +137,16 @@ export function HistoryPage() {
                           動画確認
                         </Button>
                       </>
+                    ) : item.status === "processing" || item.status === "failed" ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => navigate(`/jobs/${item.job_id}`)}
+                      >
+                        {item.status === "processing" ? "分析中…" : "詳細を見る"}
+                      </Button>
                     ) : (
-                      <span className="text-xs text-muted-foreground">
-                        {item.status === "processing" ? "分析中…" : "—"}
-                      </span>
+                      <span className="text-xs text-muted-foreground">—</span>
                     )}
                   </div>
                 </div>
