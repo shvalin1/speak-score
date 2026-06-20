@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 
@@ -12,6 +13,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from ..core.config import Settings, get_settings
+from ..core.errors import RecoverableError
 from ..repositories.job_repo import JobRepository, get_job_repo
 from ..services import pipeline
 
@@ -20,13 +22,13 @@ router = APIRouter(tags=["tasks"])
 
 USER_FACING_FAIL_MSG = "処理に失敗しました。動画を確認して再アップロードしてください。"
 
+# 後方互換: RecoverableError は core.errors に移動（pipeline との循環 import 回避）。
+# 既存の `tasks.RecoverableError` 参照のため re-export しておく。
+__all__ = ["RecoverableError", "router"]
+
 
 class ProcessRequest(BaseModel):
     job_id: str
-
-
-class RecoverableError(Exception):
-    """一時的失敗。Cloud Tasks に再試行させる（5xxを返す）。"""
 
 
 def _verify_oidc(request: Request, settings: Settings) -> None:
@@ -80,19 +82,39 @@ async def process(
         return {"status": "already_done"}  # べき等
 
     if not repo.try_acquire_lease(job_id, worker_id):
-        return {"status": "in_progress"}  # 別workerが処理中 or 遷移不可
+        # 別 worker が処理中（at-least-once の重複配信時のみ起きる）。ここで 2xx を返すと
+        # Cloud Tasks がこの task を ack して削除し、本命 worker が後で一時的失敗しても
+        # 再試行 task が消えて processing 滞留しうる。非2xx で返して Cloud Tasks に保持・
+        # 再試行させる（本命が完了すれば次の配信は already_done で 2xx になり正常に消える）。
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=409, detail="in_progress")
+
+    # リース取得で attempt_count はインクリメント済み。max_attempts に達した試行で
+    # 一時的失敗を返すと Cloud Tasks が task を破棄し worker が再呼出されず status が
+    # processing のまま永久滞留する → 最終試行では明示 fail に倒す（HIGH）。
+    is_last_attempt = repo.get_attempt_count(job_id) >= settings.max_task_attempts
 
     try:
-        result = await pipeline.run_pipeline(job_id, repo, worker_id)
-        repo.complete(job_id, result)
+        # 直列(ffmpeg→Whisper→librosa→gpt-4o)が Cloud Run timeout(1800s)に張り付くのを防ぐ
+        # ため、全体を soft_timeout で打ち切る。
+        result = await asyncio.wait_for(
+            pipeline.run_pipeline(job_id, repo, worker_id),
+            timeout=settings.soft_timeout_seconds,
+        )
+        repo.complete(job_id, result, worker_id)
         return {"status": "completed"}
-    except RecoverableError as e:
-        repo.release_lease(job_id)
+    except (RecoverableError, TimeoutError) as e:  # asyncio.wait_for は TimeoutError を送出
+        if is_last_attempt:
+            log.warning("job %s: 最終試行で一時的失敗 → fail に倒す: %s", job_id, e)
+            repo.fail(job_id, USER_FACING_FAIL_MSG, worker_id)
+            return {"status": "failed"}
+        repo.release_lease(job_id, worker_id)
         # Cloud Tasks に再試行させる（FastAPIで5xxを返す）
         from fastapi import HTTPException
 
         raise HTTPException(status_code=503, detail="recoverable") from e
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001 FatalError 含む恒久的失敗は即 fail（再試行しない）
         log.exception("pipeline failed for job %s: %s", job_id, e)
-        repo.fail(job_id, USER_FACING_FAIL_MSG)
+        repo.fail(job_id, USER_FACING_FAIL_MSG, worker_id)
         return {"status": "failed"}

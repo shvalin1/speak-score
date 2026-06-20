@@ -19,13 +19,14 @@ SIGNED_URL_TTL = timedelta(minutes=15)
 class ObjectMeta:
     exists: bool
     size: int
+    content_type: str = ""  # 実アップロードの Content-Type（発行時との整合チェック用）
 
 
 def _object_name(job_id: str, ext: str) -> str:
     return f"{job_id}/source.{ext}"
 
 
-def _ext_from_content_type(content_type: str) -> str:
+def ext_from_content_type(content_type: str) -> str:
     return {
         "video/mp4": "mp4",
         "video/quicktime": "mov",
@@ -38,7 +39,7 @@ def _ext_from_content_type(content_type: str) -> str:
 def signed_put_url(job_id: str, content_type: str) -> tuple[str, dict[str, str]]:
     """(upload_url, upload_headers) を返す。headers はPUT時にそのまま付ける（§5.2 F）。"""
     settings = get_settings()
-    ext = _ext_from_content_type(content_type)
+    ext = ext_from_content_type(content_type)
     name = _object_name(job_id, ext)
     headers = {"Content-Type": content_type}
 
@@ -77,12 +78,12 @@ def get_metadata(job_id: str, content_type: str) -> ObjectMeta:
 
     client = storage.Client(project=settings.gcp_project)
     blob = client.bucket(settings.gcs_bucket).blob(
-        _object_name(job_id, _ext_from_content_type(content_type))
+        _object_name(job_id, ext_from_content_type(content_type))
     )
     if not blob.exists():
         return ObjectMeta(exists=False, size=0)
     blob.reload()
-    return ObjectMeta(exists=True, size=blob.size or 0)
+    return ObjectMeta(exists=True, size=blob.size or 0, content_type=blob.content_type or "")
 
 
 def download_to_tmp(job_id: str, content_type: str, dest_path: str) -> str:
@@ -92,7 +93,7 @@ def download_to_tmp(job_id: str, content_type: str, dest_path: str) -> str:
 
     client = storage.Client(project=settings.gcp_project)
     blob = client.bucket(settings.gcs_bucket).blob(
-        _object_name(job_id, _ext_from_content_type(content_type))
+        _object_name(job_id, ext_from_content_type(content_type))
     )
     blob.download_to_filename(dest_path)
     return dest_path

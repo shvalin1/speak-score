@@ -1,14 +1,23 @@
 """パイプライン orchestration。各stepで repo.update_stage を逐次更新。
 
-現状は **Walking Skeleton 雛形**: 各サービスはダミー値を返し、worker→Firestore→poll の
-配線が一周することを優先する（§7 順序1b）。Step2 で各サービスの中身を流し込む。
-設計根拠: design_review_and_frontback.md §2, §5.1
+音声抽出は実装済み（GCS DL → ffmpeg で WAV mono16k）。文字起こし/音声分析/LLM評価の
+各サービスは現状ダミー値だが、配線は実処理を差し込める形になっている（Step2 Phase4 で中身を流す）。
+
+評価は **音声を直接 LLM に渡さず、Whisper の文字起こしテキストを gpt-4o に渡す**設計
+（フィラー/言い淀み込みの話し方評価を delivery 側に分離するため）。
+設計根拠: design_review_and_frontback.md §2, §5.1 / step2_plan.md Phase 1, 4。
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
+import shutil
+import tempfile
 
+from ..core import media, storage
+from ..core.config import Settings, get_settings
+from ..core.errors import FatalError, RecoverableError
 from ..repositories.job_repo import JobRepository
 from ..schemas.interview import (
     AnalysisResult,
@@ -20,44 +29,87 @@ from ..schemas.interview import (
 from . import audio_analysis, llm_evaluation, scoring, transcription
 
 
+def _prepare_audio(job_id: str, content_type: str, settings: Settings, tmp_dir: str) -> str:
+    """GCS から元動画を DL → WAV mono16k に変換し、その一時パスを返す（同期・CPU/IO bound）。
+
+    tmp_dir は呼び出し側(run_pipeline)が作成・掃除する（soft_timeout の cancel で
+    この to_thread が中断されても finally で確実に消すため）。
+    エラー分類: DL 失敗=一時的(RecoverableError)、変換/長さ/サイズ=恒久的(FatalError)。
+    """
+    ext = storage.ext_from_content_type(content_type)
+    src_path = os.path.join(tmp_dir, f"source.{ext}")
+    wav_path = os.path.join(tmp_dir, "audio.wav")
+    try:
+        storage.download_to_tmp(job_id, content_type, src_path)
+    except Exception as e:  # noqa: BLE001 GCS DL は一時的失敗として再試行に倒す
+        raise RecoverableError(f"source download failed: {e}") from e
+
+    duration = media.probe_duration(src_path)
+    if duration > settings.max_video_seconds:
+        raise FatalError(f"動画が長すぎます（{duration:.0f}s > {settings.max_video_seconds}s）")
+
+    media.extract_to_wav(src_path, wav_path)
+
+    size = os.path.getsize(wav_path)
+    if size > settings.max_audio_bytes:
+        raise FatalError(f"抽出音声が大きすぎます（{size} bytes）")
+
+    return wav_path
+
+
 async def run_pipeline(job_id: str, repo: JobRepository, worker_id: str) -> AnalysisResult:
-    # stage=extracting_audio はリース取得時にセット済み。FLAC抽出は Step2。
+    settings = get_settings()
+    # stage=extracting_audio はリース取得時にセット済み。
     repo.renew_lease(job_id, worker_id)
-    flac_path = ""  # TODO(Step2): storage.download_to_tmp → ffmpeg で FLAC 抽出
-    await asyncio.sleep(0)  # yield
 
-    repo.update_stage(job_id, ProcessingStage.transcribing)
-    repo.renew_lease(job_id, worker_id)
-    transcript = await transcription.transcribe(flac_path)
+    content_type = repo.get_content_type(job_id)
+    if not content_type:
+        raise FatalError(f"content_type not found for job {job_id}")
 
-    repo.update_stage(job_id, ProcessingStage.analyzing_audio)
-    repo.renew_lease(job_id, worker_id)
-    metrics = audio_analysis.analyze_audio(flac_path, transcript)
+    # tmp_dir は呼び出し側で作り finally で必ず掃除（soft_timeout の cancel が
+    # _prepare_audio の to_thread 中に起きても tmp がリークしないように）。
+    tmp_dir = tempfile.mkdtemp(prefix=f"job_{job_id}_")
+    try:
+        # DL→ffmpeg は同期 CPU/IO bound のため別スレッドへ（async ループを塞がない）
+        wav_path = await asyncio.to_thread(_prepare_audio, job_id, content_type, settings, tmp_dir)
 
-    repo.update_stage(job_id, ProcessingStage.evaluating)
-    repo.renew_lease(job_id, worker_id)
-    llm = await llm_evaluation.evaluate(transcript, metrics)
+        repo.update_stage(job_id, ProcessingStage.transcribing)
+        repo.renew_lease(job_id, worker_id)
+        transcript = await transcription.transcribe(wav_path)
 
-    # 算出系（delivery/confidence）は決定論スコアリング、LLM系はllmの採点を使う
-    dimensions = Dimensions(
-        content=llm.content,
-        structure=llm.structure,
-        delivery=Dimension(
-            score=scoring.score_delivery(metrics),
-            comment="話速・フィラー率・無音率から算出。",
-            source=DimensionSource.computed,
-        ),
-        confidence=Dimension(
-            score=scoring.score_confidence(metrics),
-            comment="音量安定性とピッチ変動から算出。",
-            source=DimensionSource.computed,
-        ),
-    )
-    return AnalysisResult(
-        overall_score=scoring.overall(dimensions),
-        dimensions=dimensions,
-        audio_metrics=metrics,
-        transcript=transcript,
-        strengths=llm.strengths,
-        improvements=llm.improvements,
-    )
+        repo.update_stage(job_id, ProcessingStage.analyzing_audio)
+        repo.renew_lease(job_id, worker_id)
+        # librosa 等は CPU bound のため別スレッドへ
+        metrics = await asyncio.to_thread(audio_analysis.analyze_audio, wav_path, transcript)
+
+        repo.update_stage(job_id, ProcessingStage.evaluating)
+        repo.renew_lease(job_id, worker_id)
+        # 音声でなく文字起こしテキストを LLM に渡す（話し方評価は delivery 側で分離）
+        llm = await llm_evaluation.evaluate(transcript, metrics)
+
+        # 算出系（delivery/confidence）は決定論スコアリング、LLM系はllmの採点を使う
+        dimensions = Dimensions(
+            content=llm.content,
+            structure=llm.structure,
+            delivery=Dimension(
+                score=scoring.score_delivery(metrics),
+                comment="話速・フィラー率・無音率から算出。",
+                source=DimensionSource.computed,
+            ),
+            confidence=Dimension(
+                score=scoring.score_confidence(metrics),
+                comment="音量安定性とピッチ変動から算出。",
+                source=DimensionSource.computed,
+            ),
+        )
+        return AnalysisResult(
+            overall_score=scoring.overall(dimensions),
+            dimensions=dimensions,
+            audio_metrics=metrics,
+            transcript=transcript,
+            strengths=llm.strengths,
+            improvements=llm.improvements,
+        )
+    finally:
+        # Cloud Run インスタンス再利用でディスクが溜まらないよう一時ディレクトリごと削除
+        shutil.rmtree(tmp_dir, ignore_errors=True)

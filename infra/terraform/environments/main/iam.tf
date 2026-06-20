@@ -30,10 +30,18 @@ resource "google_project_iam_member" "run_tasks_enqueuer" {
   member  = "serviceAccount:${google_service_account.run.email}"
 }
 
-# uploads バケットへの read/write（署名URL対象オブジェクトの存在確認・worker DL含む）。
-resource "google_storage_bucket_iam_member" "run_uploads" {
+# uploads バケットへの最小権限。アプリは削除しない（lifecycle が1日で自動削除）ため
+# objectAdmin は不要。get/list（存在確認 blob.exists・worker DL）= objectViewer、
+# create（署名PUT は署名SA=この実行SA の権限で create される）= objectCreator のみ付与。
+resource "google_storage_bucket_iam_member" "run_uploads_viewer" {
   bucket = google_storage_bucket.uploads.name
-  role   = "roles/storage.objectAdmin"
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.run.email}"
+}
+
+resource "google_storage_bucket_iam_member" "run_uploads_creator" {
+  bucket = google_storage_bucket.uploads.name
+  role   = "roles/storage.objectCreator"
   member = "serviceAccount:${google_service_account.run.email}"
 }
 

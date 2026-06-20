@@ -14,8 +14,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Sync (API deps only)
-        run: uv sync
+      - name: Sync (with audio/llm extras for worker services)
+        # 実サービス(transcription/audio_analysis/llm_evaluation)が numpy/librosa/openai を
+        # import するため、worker 依存(audio/llm extras)込みで sync する（Dockerfile と一致）。
+        run: uv sync --extra audio --extra llm
       - name: Lint
         run: uv run ruff check src/
       - name: Test
