@@ -4,6 +4,8 @@
 設計根拠: design_review_and_frontback.md §10
 """
 
+import os
+
 from fastapi import Depends, Header, HTTPException, status
 
 from .config import Settings, get_settings
@@ -32,7 +34,12 @@ def get_uid(
     from firebase_admin import auth as fb_auth
 
     if not firebase_admin._apps:
-        firebase_admin.initialize_app()
+        # verify_id_token は audience(project_id) 照合に project を要する。
+        # Cloud Run の ADC 解決に依存せず、run.tf が注入する FIREBASE_PROJECT を明示する
+        # （未設定時は従来どおり ADC 任せにフォールバック）。
+        project = os.environ.get("FIREBASE_PROJECT")
+        options = {"projectId": project} if project else None
+        firebase_admin.initialize_app(options=options)
     try:
         decoded = fb_auth.verify_id_token(token)
     except Exception as e:  # noqa: BLE001
