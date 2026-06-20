@@ -64,6 +64,16 @@ def test_recoverable_last_attempt_fails(client, monkeypatch):
     assert job_repo.get_job_repo().get(jid).status.value == "failed"
 
 
+def test_in_progress_returns_non_2xx(client):
+    # 別 worker がリース保持中の重複配信は 2xx で task を消さず、非2xx で再試行保持させる。
+    repo = job_repo.get_job_repo()
+    jid = _seed_processing_job()
+    assert repo.try_acquire_lease(jid, "holder") is True
+    res = client.post("/api/tasks/process", json={"job_id": jid})
+    assert res.status_code == 409
+    assert repo.get(jid).status.value == "processing"
+
+
 def test_fatal_error_fails_immediately(client, monkeypatch):
     async def _boom(*a, **k):
         raise FatalError("corrupt video")

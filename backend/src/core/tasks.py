@@ -61,6 +61,9 @@ def enqueue_process(job_id: str) -> None:
         ),
         # 実 pipeline は ffmpeg+librosa+LLM で既定 600s を超えうる。Cloud Run timeout(1800s)
         # に揃え、超過時の二重 dispatch（lease で多重処理は防げるが無駄 retry）を避ける。
+        # 重要な不等式: soft_timeout(840s) < lease(900s) < dispatch_deadline(1800s)。
+        # これにより worker は dispatch_deadline 内に必ず応答し、Cloud Tasks の再試行は
+        # 逐次（同時再配信なし）になる＝同一 job への並行 worker を防ぐ前提が成立する。
         "dispatch_deadline": {"seconds": 1800},
         "http_request": {
             "http_method": tasks_v2.HttpMethod.POST,

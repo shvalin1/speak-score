@@ -82,7 +82,13 @@ async def process(
         return {"status": "already_done"}  # べき等
 
     if not repo.try_acquire_lease(job_id, worker_id):
-        return {"status": "in_progress"}  # 別workerが処理中 or 遷移不可
+        # 別 worker が処理中（at-least-once の重複配信時のみ起きる）。ここで 2xx を返すと
+        # Cloud Tasks がこの task を ack して削除し、本命 worker が後で一時的失敗しても
+        # 再試行 task が消えて processing 滞留しうる。非2xx で返して Cloud Tasks に保持・
+        # 再試行させる（本命が完了すれば次の配信は already_done で 2xx になり正常に消える）。
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=409, detail="in_progress")
 
     # リース取得で attempt_count はインクリメント済み。max_attempts に達した試行で
     # 一時的失敗を返すと Cloud Tasks が task を破棄し worker が再呼出されず status が

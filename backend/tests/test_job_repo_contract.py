@@ -230,6 +230,19 @@ def test_trim_result_downsamples_and_caps() -> None:
     assert _trim_result(base) is base
 
 
+def test_trim_result_byte_guard() -> None:
+    # 個別フィールド暴走（巨大な strengths）でも最終的に 1MiB 安全圏に収める。
+    from src.repositories.job_repo import MAX_RESULT_BYTES, _trim_result
+
+    base = _sample_result()
+    huge = base.model_copy(update={"strengths": ["あ" * 1_000_000]})
+    assert len(huge.model_dump_json().encode()) > MAX_RESULT_BYTES  # 前提: 暴走で超過
+
+    trimmed = _trim_result(huge)
+    assert len(trimmed.model_dump_json().encode()) <= MAX_RESULT_BYTES
+    assert trimmed.transcript.segments == []  # 重い順に破棄される
+
+
 def test_list_is_owner_scoped_and_sorted(repo: JobRepository) -> None:
     owner = "owner-" + uuid.uuid4().hex
     other = "other-" + uuid.uuid4().hex
