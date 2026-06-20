@@ -12,6 +12,7 @@ services:
       dockerfile: backend/Dockerfile
     environment:
       - AUTH_DISABLED=1        # ローカルは Firebase 検証を飛ばし dev uid
+      - WORKER_OIDC_DISABLED=1 # 同期worker直叩きが OIDC 無しで通るように（本番は未設定=必須）
       - PORT=8080
       # 同期worker: enqueue は自分自身(localhost:8080)を叩く
       - WORKER_URL=http://localhost:8080

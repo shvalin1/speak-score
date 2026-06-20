@@ -23,5 +23,20 @@ SpeakScore のインフラ（GCP / Terraform）。
 
 - **Firebase Auth（Identity Platform）有効化はTerraform外・コンソール手動**（プロバイダ依存で沼）。
 
-> NOTE(Step1b): Terraform は本番経路スパイクで実装する。ここはまだ雛形ディレクトリのみ。
-> `terraform` CLI は未導入。導入後に `modules/` と `environments/main/` を作る。
+## 適用手順（Step1b）
+
+構成は単一環境のため `environments/main/` にフラット配置（過剰なmodule化はしない）。
+
+```bash
+cd infra/terraform/environments/main
+cp terraform.tfvars.example terraform.tfvars   # project_id を埋める
+terraform init -backend=false                  # 初回はローカルstate（tfstateバケットは後でブートストラップ）
+terraform plan
+terraform apply
+# 出力された backend_url を terraform.tfvars の worker_url に入れて再 apply（自己URL参照の循環回避）
+```
+
+> NOTE(Step1b): `terraform validate` 済み（HCLは健全）。`plan/apply` は GCP プロジェクト作成・
+> 認証（`gcloud auth application-default login`）後に実行する。tfstate を GCS に移すブートストラップ
+> 手順は `versions.tf` 冒頭コメント参照。Firestore TTL / 署名URL用 tokenCreator / Cloud Tasks OIDC
+> （invoker SA への actAs）は `iam.tf` に配線済み。実機での疎通検証が Step1b の本丸（§7）。

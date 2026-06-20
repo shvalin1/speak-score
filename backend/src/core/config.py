@@ -22,8 +22,11 @@ class Settings(BaseSettings):
 
     # --- Auth (Firebase) ---
     firebase_project: str = ""
-    # ローカル/モック開発で Firebase 検証を無効化し dev uid を返す
+    # ローカル/モック開発で Firebase 検証を無効化し dev uid を返す（ユーザーAPIのみ）
     auth_disabled: bool = False
+    # worker(/tasks/process) の OIDC 検証を無効化するか。既定 False=本番で常に必須(fail-closed)。
+    # auth_disabled とは独立。ローカル同期経路(core/tasks.py 直叩き)では .env で 1 にする。
+    worker_oidc_disabled: bool = False
     dev_uid: str = "dev-user"
 
     # --- LLM ---
@@ -35,7 +38,7 @@ class Settings(BaseSettings):
     # --- pipeline ---
     max_video_seconds: int = 300         # 動画長5分上限（§5.1）
     max_upload_bytes: int = 200 * 1024 * 1024
-    soft_timeout_seconds: int = 840      # Cloud Run timeout=900 に対する soft 上限
+    soft_timeout_seconds: int = 840      # Cloud Run timeout=1800 に対する soft 上限
 
     # --- emulators (local docker-compose) ---
     firestore_emulator_host: str = ""    # FIRESTORE_EMULATOR_HOST
