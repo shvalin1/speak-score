@@ -8,7 +8,7 @@ import { resetMockInterviews } from "../services/api";
 import { Button } from "@/components/ui/button";
 
 export function AuthGate({ children }: { children: ReactNode }) {
-  const { user, ready, signIn } = useAuth();
+  const { user, ready, signIn, signInWithGoogle } = useAuth();
   const { setActiveJobId } = useActiveJob();
   const wasSignedIn = useRef(false);
 
@@ -34,8 +34,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
         <p className="text-pretty text-sm text-muted-foreground">
           面接動画をアップロードして、AIフィードバックを受け取りましょう。
         </p>
-        <Button type="button" size="lg" className="mt-2" onClick={signIn}>
-          はじめる
+        <Button type="button" size="lg" className="mt-2" onClick={signInWithGoogle}>
+          Google でログイン
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground"
+          onClick={signIn}
+        >
+          ログインせずに試す（匿名）
         </Button>
       </div>
     );

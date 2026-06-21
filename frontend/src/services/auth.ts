@@ -9,6 +9,8 @@ import { initializeApp, type FirebaseApp } from "firebase/app";
 import {
   getAuth,
   signInAnonymously,
+  GoogleAuthProvider,
+  signInWithPopup,
   signOut as fbSignOut,
   onAuthStateChanged,
   type Auth,
@@ -42,7 +44,10 @@ export async function getIdToken(): Promise<string | null> {
 export interface UseAuth {
   user: { uid: string } | null;
   ready: boolean;
+  /** 匿名サインイン（その場で使い始める用）。 */
   signIn: () => Promise<void>;
+  /** Google サインイン（永続履歴・端末跨ぎ用）。ポップアップで認可する。 */
+  signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -73,6 +78,13 @@ export function useProvideAuth(): UseAuth {
     }
     await signInAnonymously(ensureAuth());
   };
+  const signInWithGoogle = async () => {
+    if (USE_MOCK) {
+      setUser({ uid: "mock-uid" });
+      return;
+    }
+    await signInWithPopup(ensureAuth(), new GoogleAuthProvider());
+  };
   const signOut = async () => {
     if (USE_MOCK) {
       setUser(null);
@@ -81,7 +93,7 @@ export function useProvideAuth(): UseAuth {
     await fbSignOut(ensureAuth());
   };
 
-  return { user, ready, signIn, signOut };
+  return { user, ready, signIn, signInWithGoogle, signOut };
 }
 
 export const AuthContext = createContext<UseAuth | null>(null);

@@ -105,6 +105,13 @@ resource "google_cloud_run_v2_service" "frontend" {
 
     containers {
       image = var.frontend_image
+
+      # nginx.conf の reverse proxy 先（${BACKEND_URL} を envsubst 展開）。
+      # 未注入だと proxy_pass が空展開になり nginx 起動失敗・/api 不通になる。
+      env {
+        name  = "BACKEND_URL"
+        value = google_cloud_run_v2_service.backend.uri
+      }
     }
   }
 

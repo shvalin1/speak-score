@@ -1,0 +1,28 @@
+# frontend イメージを Cloud Build でビルド＆Artifact Registry へ push。
+# ビルドコンテキストはリポジトリルート（Dockerfile が ../shared を参照するため）。
+# Firebase Web 設定は build-arg で bundle へ焼き込む（public 値・Secret ではない）。
+#
+# 実行例（値は .env.local から渡す）:
+#   gcloud builds submit --config infra/docker/cloudbuild.frontend.yaml \
+#     --substitutions \
+#       _IMAGE=us-central1-docker.pkg.dev/speak-score-app/speak-score/frontend:TAG,\
+#       _VITE_FIREBASE_API_KEY=...,_VITE_FIREBASE_AUTH_DOMAIN=...,_VITE_FIREBASE_PROJECT_ID=... .
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - frontend/Dockerfile
+      - --build-arg
+      - VITE_FIREBASE_API_KEY=${_VITE_FIREBASE_API_KEY}
+      - --build-arg
+      - VITE_FIREBASE_AUTH_DOMAIN=${_VITE_FIREBASE_AUTH_DOMAIN}
+      - --build-arg
+      - VITE_FIREBASE_PROJECT_ID=${_VITE_FIREBASE_PROJECT_ID}
+      - -t
+      - ${_IMAGE}
+      - .
+
+images:
+  - ${_IMAGE}
