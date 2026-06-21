@@ -16,6 +16,10 @@ import logging
 import os
 import shutil
 import tempfile
+import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Any
 
 import httpx
 
@@ -44,6 +48,43 @@ log = logging.getLogger(__name__)
 
 # Gladia ポーリング中の lease 維持。LEASE_DURATION(900s)/2=450s より十分小さく取る（§13.2）。
 _HEARTBEAT_INTERVAL_SEC = 120
+
+
+@asynccontextmanager
+async def _timed_stage(job_id: str, stage: str) -> AsyncIterator[dict[str, Any]]:
+    """1ステージの所要時間を計測し構造化ログに出す。
+
+    yield する dict に input_bytes 等を積むと stage_complete に含まれる。
+    失敗時は stage_failed を例外型のみ付けて出し（PII を出さない）再送出する。
+    """
+    extra: dict[str, Any] = {}
+    start = time.perf_counter()
+    try:
+        yield extra
+    except Exception as e:  # noqa: BLE001 ステージ失敗を記録して上位へ再送出
+        duration_ms = round((time.perf_counter() - start) * 1000, 1)
+        log.warning(
+            "stage_failed",
+            extra={
+                "job_id": job_id,
+                "stage": stage,
+                "duration_ms": duration_ms,
+                "error_type": type(e).__name__,
+                **extra,
+            },
+        )
+        raise
+    else:
+        duration_ms = round((time.perf_counter() - start) * 1000, 1)
+        log.info(
+            "stage_complete",
+            extra={
+                "job_id": job_id,
+                "stage": stage,
+                "duration_ms": duration_ms,
+                **extra,
+            },
+        )
 
 
 def _prepare_audio(job_id: str, content_type: str, settings: Settings, tmp_dir: str) -> str:
@@ -153,24 +194,30 @@ async def run_pipeline(job_id: str, repo: JobRepository, worker_id: str) -> Anal
     tmp_dir = tempfile.mkdtemp(prefix=f"job_{job_id}_")
     try:
         # DL→ffmpeg は同期 CPU/IO bound のため別スレッドへ（async ループを塞がない）
-        wav_path = await asyncio.to_thread(_prepare_audio, job_id, content_type, settings, tmp_dir)
+        async with _timed_stage(job_id, ProcessingStage.extracting_audio.value) as ex:
+            wav_path = await asyncio.to_thread(
+                _prepare_audio, job_id, content_type, settings, tmp_dir
+            )
+            ex["input_bytes"] = os.path.getsize(wav_path)
 
         # 話者分離（Gladia・B方式）。キー未設定/障害/1話者なら空 turns で縮退。
         turns = await _diarize_or_degrade(wav_path, settings, job_id, repo, worker_id)
 
         repo.update_stage(job_id, ProcessingStage.transcribing)
         repo.renew_lease(job_id, worker_id)
-        tr = await transcription.transcribe_verbose(wav_path)
-        transcript = tr.transcript
-        # 話者を充填（full_text/fillers は不変・segments のみ差し替え）。turns 空なら素通り。
-        if turns:
-            attributed = diarization.attribute_speakers(transcript.segments, tr.words, turns)
-            transcript = transcript.model_copy(update={"segments": attributed})
+        async with _timed_stage(job_id, ProcessingStage.transcribing.value):
+            tr = await transcription.transcribe_verbose(wav_path)
+            transcript = tr.transcript
+            # 話者を充填（full_text/fillers は不変・segments のみ差し替え）。turns 空なら素通り。
+            if turns:
+                attributed = diarization.attribute_speakers(transcript.segments, tr.words, turns)
+                transcript = transcript.model_copy(update={"segments": attributed})
 
         repo.update_stage(job_id, ProcessingStage.analyzing_audio)
         repo.renew_lease(job_id, worker_id)
         # librosa 等は CPU bound のため別スレッドへ
-        metrics = await asyncio.to_thread(audio_analysis.analyze_audio, wav_path, transcript)
+        async with _timed_stage(job_id, ProcessingStage.analyzing_audio.value):
+            metrics = await asyncio.to_thread(audio_analysis.analyze_audio, wav_path, transcript)
 
         # LLM#0: 応募者の話者を判定（失敗/不確実は縮退・例外を上げない）。
         applicant = await asyncio.to_thread(applicant_id.identify_applicant, transcript.segments)
@@ -182,12 +229,13 @@ async def run_pipeline(job_id: str, repo: JobRepository, worker_id: str) -> Anal
         repo.update_stage(job_id, ProcessingStage.evaluating)
         repo.renew_lease(job_id, worker_id)
         # LLM#1(評価) と LLM#2(議事録/問答整形) を並行実行。整形失敗はジョブを落とさず縮退。
-        llm, qa = await asyncio.gather(
-            llm_evaluation.evaluate(
-                transcript, metrics, applicant_text=applicant_text, degraded=eval_degraded
-            ),
-            _format_qa_or_degrade(transcript.segments, metrics, applicant.speaker),
-        )
+        async with _timed_stage(job_id, ProcessingStage.evaluating.value):
+            llm, qa = await asyncio.gather(
+                llm_evaluation.evaluate(
+                    transcript, metrics, applicant_text=applicant_text, degraded=eval_degraded
+                ),
+                _format_qa_or_degrade(transcript.segments, metrics, applicant.speaker),
+            )
 
         # 算出系（delivery/confidence）は決定論スコアリング、LLM系はllmの採点を使う
         dimensions = Dimensions(

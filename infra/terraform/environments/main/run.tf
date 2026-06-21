@@ -63,6 +63,16 @@ resource "google_cloud_run_v2_service" "backend" {
         name  = "FIREBASE_PROJECT"
         value = var.project_id
       }
+      # 観測性（Sentry）。DSN は ingest 専用の低機微キーのため plain env で渡す
+      # （tfstate には入るが Secret Manager 化はしない）。空なら backend 側で init をスキップ。
+      env {
+        name  = "SENTRY_DSN"
+        value = var.sentry_dsn
+      }
+      env {
+        name  = "SENTRY_ENVIRONMENT"
+        value = var.sentry_environment
+      }
       # Step2: Whisper + gpt-4o 用。値は Secret Manager（tfstate に入れない・secrets.tf）。
       # 注意: deploy 前に openai-api-key へ版を1つ追加しておくこと（版0だと Run 起動失敗）。
       env {

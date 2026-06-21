@@ -96,6 +96,18 @@ export async function listQa(): Promise<QaIndexEntry[]> {
   return jsonOrThrow<QaIndexEntry[]>(await authedFetch("/qa"));
 }
 
+/**
+ * 完了済みジョブの動画再生URL（GCS署名GET）。動画は1日でGCSから自動削除されるため、
+ * 期限切れ・未取得・モック時は null（呼び出し側はプレースホルダ表示にフォールバック）。
+ */
+export async function getVideoUrl(jobId: string): Promise<string | null> {
+  if (USE_MOCK) return null; // モックは実動画が無い
+  const res = await jsonOrThrow<{ video_url: string | null }>(
+    await authedFetch(`/interviews/${jobId}/video-url`),
+  );
+  return res.video_url;
+}
+
 // XHRで進捗%を取れる署名URL PUT（fetchはアップロード進捗が取れないためXHR）。
 function putToSignedUrl(
   url: string,

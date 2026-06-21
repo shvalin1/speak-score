@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # auth_disabled とは独立。ローカル同期経路(core/tasks.py 直叩き)では .env で 1 にする。
     worker_oidc_disabled: bool = False
     dev_uid: str = "dev-user"
+    # 匿名ログインは全員この単一 uid に寄せ、評価済みのデモ結果を共有プールで見せる。
+    # Google 等の本物のプロバイダは各自の uid で個人スコープに分離する（auth.get_uid）。
+    # 注意: 匿名ユーザー同士は結果が相互に見えるため、本利用は Google ログインへ誘導する。
+    demo_uid: str = "demo-shared"
 
     # --- LLM ---
     llm_provider: str = "openai"         # anthropic | openai（Step2 は OpenAI 1本: Whisper+gpt-4o）
@@ -55,6 +59,12 @@ class Settings(BaseSettings):
     # Cloud Tasks の retry_config.max_attempts と一致させること（tasks.tf）。
     # 最終試行で一時的失敗のとき worker は再呼出されないため、明示 fail に倒す判定に使う。
     max_task_attempts: int = 3
+
+    # --- observability ---
+    log_level: str = "INFO"              # 構造化ログの出力レベル（core/logging.py）
+    sentry_dsn: str = ""                 # 空なら Sentry 無効（init スキップ）
+    sentry_environment: str = ""         # 例: production / staging（空なら未設定）
+    sentry_traces_sample_rate: float = 0.0  # 既定はエラーのみ（トレースは課金を考慮し off）
 
     # --- emulators (local docker-compose) ---
     firestore_emulator_host: str = ""    # FIRESTORE_EMULATOR_HOST
