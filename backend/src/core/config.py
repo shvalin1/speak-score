@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # auth_disabled とは独立。ローカル同期経路(core/tasks.py 直叩き)では .env で 1 にする。
     worker_oidc_disabled: bool = False
     dev_uid: str = "dev-user"
+    # 匿名ログインは全員この単一 uid に寄せ、評価済みのデモ結果を共有プールで見せる。
+    # Google 等の本物のプロバイダは各自の uid で個人スコープに分離する（auth.get_uid）。
+    # 注意: 匿名ユーザー同士は結果が相互に見えるため、本利用は Google ログインへ誘導する。
+    demo_uid: str = "demo-shared"
 
     # --- LLM ---
     llm_provider: str = "openai"         # anthropic | openai（Step2 は OpenAI 1本: Whisper+gpt-4o）

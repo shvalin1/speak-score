@@ -9,6 +9,7 @@ import { GraduationCap, Video } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Dashboard } from "./Dashboard";
+import { AudioTimeline } from "./AudioTimeline";
 import type { AnalysisResult, TranscriptSegment } from "../types/interview";
 
 type Tab = "score" | "video";
@@ -88,7 +89,7 @@ export function ResultPage({
 
       {/* 中身 */}
       {tab === "score" ? (
-        <Dashboard result={result} onReset={onReset} />
+        <Dashboard result={result} onReset={onReset} exportLabel={createdLabel} />
       ) : (
         <VideoTab result={result} videoUrl={videoUrl} />
       )}
@@ -130,7 +131,8 @@ function VideoTab({ result, videoUrl }: { result: AnalysisResult; videoUrl?: str
   };
 
   return (
-    <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[1.1fr_1fr]">
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[1.1fr_1fr]">
       {/* 左: 動画 + サマリ指標 */}
       <div className="flex flex-col gap-3">
         <div className="aspect-video overflow-hidden rounded-xl bg-black ring-1 ring-foreground/10">
@@ -174,6 +176,10 @@ function VideoTab({ result, videoUrl }: { result: AnalysisResult; videoUrl?: str
           ))}
         </div>
       </div>
+      </div>
+
+      {/* 声（音量・ピッチ）の時系列。再生位置に赤い再生ヘッド、クリックでシーク。 */}
+      <AudioTimeline metrics={m} currentTime={currentTime} onSeek={seek} />
     </div>
   );
 }

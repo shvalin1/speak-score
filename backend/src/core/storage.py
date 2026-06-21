@@ -13,6 +13,8 @@ from datetime import timedelta
 from .config import get_settings
 
 SIGNED_URL_TTL = timedelta(minutes=15)
+# 再生中に URL が切れないよう、GET は PUT より長めにする（動画タブの視聴想定）。
+SIGNED_GET_URL_TTL = timedelta(minutes=30)
 
 
 @dataclass
@@ -68,6 +70,38 @@ def signed_put_url(job_id: str, content_type: str) -> tuple[str, dict[str, str]]
         access_token=credentials.token,
     )
     return url, headers
+
+
+def signed_get_url(job_id: str, content_type: str) -> str | None:
+    """アップロード済み source 動画の署名GET URL（動画タブ再生用）。
+
+    オブジェクトが無い場合（GCS lifecycle で1日後に自動削除済み等）は None を返す。
+    署名は PUT と同じ IAM SignBlob 経路（run SA に self tokenCreator）。
+    """
+    settings = get_settings()
+    if not settings.gcs_bucket:
+        return None  # ローカル（GCS未配線）は再生 URL なし
+
+    import google.auth  # 遅延import
+    from google.auth.transport.requests import Request
+    from google.cloud import storage
+
+    credentials, _ = google.auth.default()
+    credentials.refresh(Request())
+
+    client = storage.Client(project=settings.gcp_project, credentials=credentials)
+    blob = client.bucket(settings.gcs_bucket).blob(
+        _object_name(job_id, ext_from_content_type(content_type))
+    )
+    if not blob.exists():
+        return None  # 未アップロード or 期限切れで削除済み
+    return blob.generate_signed_url(
+        version="v4",
+        method="GET",
+        expiration=SIGNED_GET_URL_TTL,
+        service_account_email=credentials.service_account_email,
+        access_token=credentials.token,
+    )
 
 
 def get_metadata(job_id: str, content_type: str) -> ObjectMeta:

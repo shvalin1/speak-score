@@ -108,3 +108,51 @@ def test_start_202_when_uploaded_ok(client, monkeypatch):
     res = client.post(f"/api/interviews/{jid}/start")
     assert res.status_code == 202
     assert res.json()["status"] == "processing"
+
+
+def test_video_url_returns_signed_url_when_present(client, monkeypatch):
+    from src.core import storage
+
+    jid = _seed_job_with_bucket(monkeypatch)
+    monkeypatch.setattr(storage, "signed_get_url", lambda *a: "https://signed.example/v")
+    res = client.get(f"/api/interviews/{jid}/video-url")
+    assert res.status_code == 200
+    assert res.json()["video_url"] == "https://signed.example/v"
+
+
+def test_video_url_null_when_object_missing(client, monkeypatch):
+    from src.core import storage
+
+    jid = _seed_job_with_bucket(monkeypatch)
+    # GCS lifecycle で削除済み等 → None
+    monkeypatch.setattr(storage, "signed_get_url", lambda *a: None)
+    res = client.get(f"/api/interviews/{jid}/video-url")
+    assert res.status_code == 200
+    assert res.json()["video_url"] is None
+
+
+def test_video_url_404_for_unknown_job(client):
+    res = client.get("/api/interviews/does-not-exist/video-url")
+    assert res.status_code == 404
+
+
+def test_video_url_403_for_non_owner(client, monkeypatch):
+    import uuid
+    from datetime import UTC, datetime, timedelta
+
+    monkeypatch.setenv("GCS_BUCKET", "test-bucket")
+    from src.core.config import get_settings
+    from src.repositories import job_repo
+
+    get_settings.cache_clear()
+    job_repo._repo = None
+    repo = job_repo.get_job_repo()
+    jid = uuid.uuid4().hex
+    repo.create(
+        jid,
+        owner_uid="other-user",  # dev-user 以外の所有者
+        expire_at=datetime.now(UTC) + timedelta(days=1),
+        content_type="video/mp4",
+    )
+    res = client.get(f"/api/interviews/{jid}/video-url")
+    assert res.status_code == 403

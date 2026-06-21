@@ -47,4 +47,10 @@ def get_uid(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid token",
         ) from e
+    # 匿名ログインは全員を単一の共有 uid に寄せ、評価済みデモ結果を共有プールで見せる。
+    # provider は decoded["firebase"]["sign_in_provider"]（匿名は "anonymous"）。
+    # Google 等の本物のプロバイダは各自の uid のまま個人スコープに分離する。
+    provider = decoded.get("firebase", {}).get("sign_in_provider")
+    if provider == "anonymous":
+        return settings.demo_uid
     return decoded["uid"]

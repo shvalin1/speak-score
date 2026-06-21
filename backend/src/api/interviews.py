@@ -9,6 +9,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 
 from ..core import storage, tasks
 from ..core.auth import get_uid
@@ -128,3 +129,30 @@ def list_interviews(
     repo: JobRepository = Depends(get_job_repo),
 ) -> list[InterviewSummary]:
     return repo.list_for_owner(uid)
+
+
+class VideoUrlResponse(BaseModel):
+    """GET /interviews/{job_id}/video-url のレスポンス。
+
+    凍結契約（AnalysisResult）を汚さないよう、ここにローカル定義する。
+    動画が GCS lifecycle で削除済み（1日経過）の場合 video_url は null。
+    """
+
+    video_url: str | None
+
+
+@router.get("/interviews/{job_id}/video-url")
+def get_video_url(
+    job_id: str,
+    uid: str = Depends(get_uid),
+    repo: JobRepository = Depends(get_job_repo),
+) -> VideoUrlResponse:
+    # 他人の動画 URL を取らせないよう owner を照合（get_interview と同じ規約）。
+    owner = repo.get_owner(job_id)
+    if owner is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "job not found")
+    if owner != uid:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "forbidden")
+    content_type = repo.get_content_type(job_id)
+    video_url = storage.signed_get_url(job_id, content_type or "")
+    return VideoUrlResponse(video_url=video_url)
