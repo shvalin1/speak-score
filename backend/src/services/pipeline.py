@@ -174,12 +174,18 @@ async def run_pipeline(job_id: str, repo: JobRepository, worker_id: str) -> Anal
 
         # LLM#0: 応募者の話者を判定（失敗/不確実は縮退・例外を上げない）。
         applicant = await asyncio.to_thread(applicant_id.identify_applicant, transcript.segments)
+        # 評価入力を応募者発話のみに絞る（相槌・面接官発話の汚染除去）。話者分離なしは全文。
+        applicant_text, eval_degraded = llm_evaluation.select_applicant_text(
+            transcript.segments, applicant.speaker, applicant_degraded=applicant.degraded
+        )
 
         repo.update_stage(job_id, ProcessingStage.evaluating)
         repo.renew_lease(job_id, worker_id)
         # LLM#1(評価) と LLM#2(議事録/問答整形) を並行実行。整形失敗はジョブを落とさず縮退。
         llm, qa = await asyncio.gather(
-            llm_evaluation.evaluate(transcript, metrics),
+            llm_evaluation.evaluate(
+                transcript, metrics, applicant_text=applicant_text, degraded=eval_degraded
+            ),
             _format_qa_or_degrade(transcript.segments, metrics, applicant.speaker),
         )
 

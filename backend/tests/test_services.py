@@ -361,3 +361,48 @@ def test_identify_applicant_llm_failure_degrades(monkeypatch) -> None:
     monkeypatch.setattr(applicant_id, "_call_llm", boom)
     r = applicant_id.identify_applicant(_two_speaker_segs())
     assert r.speaker is None and r.degraded is True  # 例外を上げずに縮退
+
+
+# --- llm_evaluation: 応募者発話の選別と degraded 注記（Phase3）-------------------
+
+def test_select_applicant_text_uses_applicant_only() -> None:
+    segs = [
+        TranscriptSegment(start=0.0, end=2.0, text="質問です", speaker="0"),
+        TranscriptSegment(start=2.0, end=8.0, text="応募者の回答", speaker="1"),
+    ]
+    text, degraded = llm_evaluation.select_applicant_text(segs, "1", applicant_degraded=False)
+    assert text == "応募者の回答" and degraded is False
+
+
+def test_select_applicant_text_soft_prior_when_unknown() -> None:
+    # 未確定だが2話者 → 最長発話(speaker1)を soft prior、degraded True
+    segs = [
+        TranscriptSegment(start=0.0, end=2.0, text="短い", speaker="0"),
+        TranscriptSegment(start=2.0, end=10.0, text="長い回答", speaker="1"),
+    ]
+    text, degraded = llm_evaluation.select_applicant_text(segs, None, applicant_degraded=True)
+    assert text == "長い回答" and degraded is True
+
+
+def test_select_applicant_text_no_diarization_returns_full_text() -> None:
+    # 話者分離なし（<2話者）→ None（全文で評価）・degraded False
+    segs = [TranscriptSegment(start=0.0, end=5.0, text="全文", speaker=None)]
+    text, degraded = llm_evaluation.select_applicant_text(segs, None, applicant_degraded=True)
+    assert text is None and degraded is False
+
+
+def test_llm_evaluation_degraded_appends_note(monkeypatch) -> None:
+    monkeypatch.setattr(llm_evaluation, "_call_llm", lambda _p: _valid_llm_json())
+    t = Transcript(full_text="x", duration_sec=1.0, segments=[], fillers=[])
+    m = AudioMetrics(
+        speech_rate_cpm=300.0, filler_count=0, filler_rate=0.0, silence_ratio=0.1,
+        silence_segments=[], pitch_mean=140.0, pitch_std=25.0, volume_mean=0.05,
+        volume_cv=0.4, volume_timeline=[], pitch_timeline=[],
+    )
+
+    result = asyncio.run(
+        llm_evaluation.evaluate(t, m, applicant_text="応募者のみ", degraded=True)
+    )
+
+    assert "話者特定が不確実" in result.content.comment
+    assert "話者特定が不確実" in result.structure.comment

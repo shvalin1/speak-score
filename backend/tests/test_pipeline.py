@@ -101,7 +101,7 @@ def _mock_services(monkeypatch) -> None:
             volume_mean=0.05, volume_cv=0.4, volume_timeline=[], pitch_timeline=[],
         )
 
-    async def fake_evaluate(_t: Transcript, _m: AudioMetrics) -> LlmEvaluation:
+    async def fake_evaluate(_t: Transcript, _m: AudioMetrics, **_k) -> LlmEvaluation:
         return LlmEvaluation(
             content=Dimension(score=75, comment="c", source=DimensionSource.llm),
             structure=Dimension(score=70, comment="s", source=DimensionSource.llm),
