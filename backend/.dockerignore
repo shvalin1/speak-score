@@ -1,0 +1,11 @@
+# backend の docker build（context=backend/）から除外。Dockerfile が使うのは
+# pyproject.toml / uv.lock / src のみ。venv・キャッシュ・秘密・tests は入れない。
+.venv/
+.env
+.env.*
+!.env.example
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+**/__pycache__/
+tests/

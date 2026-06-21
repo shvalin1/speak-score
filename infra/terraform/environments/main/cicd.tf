@@ -11,15 +11,16 @@ resource "google_service_account" "deployer" {
 }
 
 # deployer のプロジェクト権限（最小限）。
-#  run.developer            … Cloud Run の新リビジョンをデプロイ（image 差し替え）
-#  cloudbuild.builds.editor … Cloud Build へビルドを submit
-#  logging.viewer           … gcloud builds submit のログストリーミング（read-only）
-# ※ actAs と Storage は「対象リソースだけ」に絞って下で個別付与する（プロジェクト全体には撒かない）。
+#  run.developer                     … Cloud Run の新リビジョンをデプロイ（image 差し替え）
+#  serviceusage.serviceUsageConsumer … gcloud run deploy が quota project を使うための保険
+#                                      （serviceusage.services.use を含む）
+# ※ イメージは GitHub ランナー上で docker build し AR へ push する方式（cicd.tf 冒頭）。
+#   Cloud Build は使わない＝WIF と gcloud builds submit の quota project 相性問題を回避。
+#   AR への push 権限はリポジトリスコープで別途付与（下記）。actAs も対象SAだけに絞る。
 locals {
   deployer_roles = [
     "roles/run.developer",
-    "roles/cloudbuild.builds.editor",
-    "roles/logging.viewer",
+    "roles/serviceusage.serviceUsageConsumer",
   ]
 }
 
@@ -46,12 +47,13 @@ resource "google_service_account_iam_member" "deployer_actas_compute" {
   member             = "serviceAccount:${google_service_account.deployer.email}"
 }
 
-# Cloud Build のソースステージング（gs://<project>_cloudbuild）への書き込みだけを許可。
-# プロジェクト全体の storage 権限は付けない（uploads バケット＝ユーザー動画に触れさせない）。
-resource "google_storage_bucket_iam_member" "deployer_cloudbuild_staging" {
-  bucket = "${var.project_id}_cloudbuild"
-  role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:${google_service_account.deployer.email}"
+# Artifact Registry の speak-score リポジトリへの push 権限（リポジトリスコープ）。
+# ランナーで docker build したイメージを push するために必要。プロジェクト全体には撒かない。
+resource "google_artifact_registry_repository_iam_member" "deployer_ar_writer" {
+  location   = var.region
+  repository = google_artifact_registry_repository.docker.repository_id
+  role       = "roles/artifactregistry.writer"
+  member     = "serviceAccount:${google_service_account.deployer.email}"
 }
 
 # --- Workload Identity Pool / Provider（GitHub OIDC を信頼）---
