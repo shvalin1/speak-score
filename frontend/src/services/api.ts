@@ -9,6 +9,7 @@ import type {
   InterviewSummary,
   JobStatus,
   ProcessingStage,
+  QaIndexEntry,
   StartResponse,
 } from "../types/interview";
 import sampleResult from "@shared/mock_data/sample_result.json";
@@ -87,6 +88,12 @@ export async function getInterview(jobId: string): Promise<InterviewJob> {
 export async function listInterviews(): Promise<InterviewSummary[]> {
   if (USE_MOCK) return mockListInterviews();
   return jsonOrThrow<InterviewSummary[]>(await authedFetch("/interviews"));
+}
+
+/** 動画横断の設問一覧（score 降順）。横断一覧ページ（QaListPage）で使う。 */
+export async function listQa(): Promise<QaIndexEntry[]> {
+  if (USE_MOCK) return mockListQa();
+  return jsonOrThrow<QaIndexEntry[]>(await authedFetch("/qa"));
 }
 
 // XHRで進捗%を取れる署名URL PUT（fetchはアップロード進捗が取れないためXHR）。
@@ -261,4 +268,28 @@ async function mockListInterviews(): Promise<InterviewSummary[]> {
       status,
     };
   });
+}
+
+async function mockListQa(): Promise<QaIndexEntry[]> {
+  await sleep(150);
+  const sample = sampleResult as unknown as AnalysisResult;
+  const segs = sample.qa_segments ?? [];
+  // 完了済みの各モックジョブから設問索引を展開（本番 qa_index と同じ形）。
+  const entries: QaIndexEntry[] = [];
+  for (const j of mockJobs.values()) {
+    const done = Date.now() - j.startedAt >= MOCK_TOTAL_MS;
+    if (!done || j.failReason) continue;
+    for (const s of segs) {
+      entries.push({
+        job_id: j.job_id,
+        created_at: j.created_at,
+        index: s.index,
+        question: s.question,
+        score: s.score,
+        pitch_mean: s.audio?.pitch_mean ?? 0,
+        intent: s.intent,
+      });
+    }
+  }
+  return entries.sort((a, b) => b.score - a.score); // score 降順
 }

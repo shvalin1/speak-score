@@ -84,3 +84,15 @@ export interface StartResponse { job_id: string; status: JobStatus; }
 export interface InterviewSummary {
   job_id: string; created_at: string; overall_score: number | null; status: JobStatus;
 }
+
+// GET /qa のレスポンス（動画横断の設問索引）。凍結契約(AnalysisResult)外で、
+// backend は repositories/job_repo.py の QaIndexEntry が出典。answer 等は持たない軽量索引。
+export interface QaIndexEntry {
+  job_id: string;
+  created_at: string;
+  index: number;
+  question: string;
+  score: number;
+  pitch_mean: number;
+  intent: QuestionIntent;
+}

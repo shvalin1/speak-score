@@ -7,7 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useInterviewJob } from "../hooks/useInterviewJob";
 import { AnalysisProgress } from "../components/AnalysisProgress";
-import { ResultPage } from "../components/ResultPage";
+import { ResultPage, type Tab } from "../components/ResultPage";
+
+const VALID_TABS: Tab[] = ["score", "video", "minutes", "qa"];
 
 // job.error（バックエンド内部のエラーメッセージ）を日本語のユーザー向けメッセージに変換する。
 // サイズ/フォーマットはUploadZoneのクライアント側検証で弾くため、ここではアップロード後に
@@ -34,7 +36,8 @@ export function JobPage() {
   const reset = () => navigate("/");
 
   if (job?.status === "completed" && job.result) {
-    const initialTab = searchParams.get("tab") === "video" ? "video" : "score";
+    const param = searchParams.get("tab");
+    const initialTab = VALID_TABS.find((t) => t === param) ?? "score";
     return <ResultPage result={job.result} onReset={reset} initialTab={initialTab} />;
   }
 
