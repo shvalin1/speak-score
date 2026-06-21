@@ -1,11 +1,13 @@
 // 分析進捗・結果・エラーの表示（加藤）。job のステータスから表示を導出する。
 // 設計根拠: Issue #8（React Router v7導入）、design_review_and_frontback.md §6.2, §6.3
 
+import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { CircleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useInterviewJob } from "../hooks/useInterviewJob";
+import { getVideoUrl } from "../services/api";
 import { AnalysisProgress } from "../components/AnalysisProgress";
 import { ResultPage } from "../components/ResultPage";
 
@@ -33,9 +35,30 @@ export function JobPage() {
   const { job } = useInterviewJob(jobId);
   const reset = () => navigate("/");
 
+  // 完了後に署名GET URLを取得して動画タブで再生できるようにする。
+  // 動画は1日でGCSから削除されるため、期限切れ等は null → プレースホルダ表示にフォールバック。
+  const [videoUrl, setVideoUrl] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (job?.status !== "completed") return;
+    let cancelled = false;
+    getVideoUrl(jobId)
+      .then((url) => !cancelled && setVideoUrl(url ?? undefined))
+      .catch(() => !cancelled && setVideoUrl(undefined));
+    return () => {
+      cancelled = true;
+    };
+  }, [job?.status, jobId]);
+
   if (job?.status === "completed" && job.result) {
     const initialTab = searchParams.get("tab") === "video" ? "video" : "score";
-    return <ResultPage result={job.result} onReset={reset} initialTab={initialTab} />;
+    return (
+      <ResultPage
+        result={job.result}
+        videoUrl={videoUrl}
+        onReset={reset}
+        initialTab={initialTab}
+      />
+    );
   }
 
   if (job?.status === "failed") {
