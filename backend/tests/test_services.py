@@ -14,8 +14,13 @@ import pytest
 import soundfile as sf
 
 from src.core.errors import FatalError, RecoverableError
-from src.schemas.interview import AudioMetrics, Transcript
-from src.services import audio_analysis, llm_evaluation, transcription
+from src.schemas.interview import (
+    AudioMetrics,
+    TimePoint,
+    Transcript,
+    TranscriptSegment,
+)
+from src.services import audio_analysis, llm_evaluation, qa_formatting, transcription
 
 
 def test_find_fillers_longest_match_no_overlap() -> None:
@@ -142,3 +147,90 @@ def test_llm_evaluation_refusal_is_fatal_not_retried(monkeypatch) -> None:
     with pytest.raises(FatalError):
         asyncio.run(llm_evaluation.evaluate(t, m))
     assert calls["n"] == 1  # リトライされない
+
+
+# --- qa_formatting（議事録④ + 設問別問答⑤）------------------------------------
+
+def _metrics_with_pitch(pitch_timeline: list[TimePoint]) -> AudioMetrics:
+    return AudioMetrics(
+        speech_rate_cpm=0.0, filler_count=0, filler_rate=0.0, silence_ratio=0.0,
+        silence_segments=[], pitch_mean=0.0, pitch_std=0.0, volume_mean=0.0,
+        volume_cv=0.0, volume_timeline=[], pitch_timeline=pitch_timeline,
+    )
+
+
+def _valid_qa_json() -> str:
+    return json.dumps({
+        "minutes": {
+            "summary": "山田さんの自己紹介と志望動機。",
+            "topics": ["自己紹介", "志望動機"],
+            "key_points": ["具体例あり"],
+        },
+        "qa_segments": [{
+            "question": "自己紹介をお願いします。",
+            "answer": "えっと、私は山田です。",   # フィラー「えっと」を含む
+            "start": 0.0,
+            "end": 4.0,
+            "score": 120,                          # 範囲外 → clamp 確認
+            "comment": "具体性あり",
+            "intent": "self_intro",
+            "is_reverse_question": False,
+            "question_inferred": False,
+        }],
+    })
+
+
+def test_qa_formatting_parses_and_attaches_audio(monkeypatch) -> None:
+    monkeypatch.setattr(qa_formatting, "_call_llm", lambda _p: _valid_qa_json())
+    # [0,4] 内のピッチ点だけ集計され、t=10 は除外される
+    pitch = [TimePoint(t=1.0, value=120.0), TimePoint(t=2.0, value=140.0),
+             TimePoint(t=10.0, value=200.0)]
+    segs = [
+        TranscriptSegment(start=0.0, end=4.0, text="自己紹介をお願いします。", speaker="0"),
+        TranscriptSegment(start=4.0, end=8.0, text="えっと、私は山田です。", speaker="1"),
+    ]
+
+    out = asyncio.run(qa_formatting.format_qa(segs, _metrics_with_pitch(pitch), "1"))
+
+    assert out.minutes.summary.startswith("山田さん")
+    assert out.minutes.topics == ["自己紹介", "志望動機"]
+    assert len(out.qa_segments) == 1
+    qa = out.qa_segments[0]
+    assert qa.index == 0
+    assert qa.score == 100                # 120 → clamp
+    assert qa.intent.value == "self_intro"
+    # QaAudio は LLM ではなく決定論で後付けされる
+    assert qa.audio is not None
+    assert qa.audio.pitch_mean == 130.0   # (120+140)/2、t=10 は区間外で除外
+    assert qa.audio.filler_count == 1     # 「えっと」を answer から検出
+
+
+def test_qa_formatting_preprocess_merges_and_drops_backchannel() -> None:
+    segs = [
+        TranscriptSegment(start=0.0, end=5.0, text="長い回答前半", speaker="1"),
+        TranscriptSegment(start=5.0, end=5.4, text="はい", speaker="0"),  # 0.4s 相槌
+        TranscriptSegment(start=5.4, end=10.0, text="長い回答後半", speaker="1"),
+    ]
+
+    out = qa_formatting._preprocess_segments(segs)
+
+    # 相槌が落ち、前後の同一話者が結合されて1セグメントになる
+    assert len(out) == 1
+    assert out[0].speaker == "1"
+    assert out[0].start == 0.0 and out[0].end == 10.0
+    assert out[0].text == "長い回答前半 長い回答後半"
+
+
+def test_qa_formatting_retries_then_recoverable(monkeypatch) -> None:
+    calls = {"n": 0}
+
+    def bad(_p: str) -> str:
+        calls["n"] += 1
+        return "not json{"
+
+    monkeypatch.setattr(qa_formatting, "_call_llm", bad)
+    segs = [TranscriptSegment(start=0.0, end=2.0, text="x", speaker="1")]
+
+    with pytest.raises(RecoverableError):
+        asyncio.run(qa_formatting.format_qa(segs, _metrics_with_pitch([]), "1"))
+    assert calls["n"] == 2  # 初回 + 1リトライ

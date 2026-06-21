@@ -4,7 +4,7 @@
 
 export type JobStatus = "awaiting_upload" | "processing" | "completed" | "failed";
 export type ProcessingStage =
-  | "extracting_audio" | "transcribing" | "analyzing_audio" | "evaluating";
+  | "extracting_audio" | "diarizing" | "transcribing" | "analyzing_audio" | "evaluating";
 export type DimensionSource = "computed" | "llm";
 
 export interface Dimension { score: number; comment: string; source: DimensionSource; }
@@ -33,6 +33,33 @@ export interface Transcript {
   full_text: string; duration_sec: number;
   segments: TranscriptSegment[]; fillers: FillerHit[];
 }
+export interface QaAudio {
+  pitch_mean: number;
+  pitch_std: number;
+  speech_rate_cpm: number;
+  filler_count: number;
+}
+export type QuestionIntent =
+  | "self_intro" | "motivation" | "strength" | "weakness"
+  | "experience" | "reverse" | "other";
+export interface QaSegment {
+  index: number;
+  question: string;
+  answer: string;
+  start: number;
+  end: number;
+  score: number;
+  comment: string;
+  intent: QuestionIntent;
+  is_reverse_question: boolean;
+  question_inferred: boolean;
+  audio?: QaAudio | null;
+}
+export interface Minutes {
+  summary: string;
+  topics: string[];
+  key_points: string[];
+}
 export interface AnalysisResult {
   overall_score: number;
   dimensions: Dimensions;
@@ -40,6 +67,9 @@ export interface AnalysisResult {
   transcript: Transcript;
   strengths: string[];
   improvements: string[];
+  // 話者分離→LLM整形エピック（004/005）で追加。旧データは undefined/空配列で素通り。
+  minutes?: Minutes | null;
+  qa_segments?: QaSegment[];
 }
 export interface InterviewJob {
   job_id: string; status: JobStatus; stage?: ProcessingStage | null;

@@ -22,6 +22,7 @@ class JobStatus(str, Enum):
 
 class ProcessingStage(str, Enum):
     extracting_audio = "extracting_audio"
+    diarizing = "diarizing"            # 話者分離（Gladia）。キー未設定/障害/1話者時はスキップ
     transcribing = "transcribing"
     analyzing_audio = "analyzing_audio"
     evaluating = "evaluating"
@@ -92,6 +93,51 @@ class Transcript(BaseModel):
     fillers: list[FillerHit]
 
 
+class QaAudio(BaseModel):
+    """設問-回答の区間ごとの音声サマリ（LLMではなく決定論で後付け算出）。"""
+
+    pitch_mean: float
+    pitch_std: float
+    speech_rate_cpm: float
+    filler_count: int
+
+
+class QuestionIntent(str, Enum):
+    """横断一覧の名寄せ用カテゴリ（生の質問文の揺れを吸収し経時比較を可能にする）。"""
+
+    self_intro = "self_intro"        # 自己紹介
+    motivation = "motivation"        # 志望動機
+    strength = "strength"            # 強み/長所
+    weakness = "weakness"            # 弱み/短所
+    experience = "experience"        # 経験/ガクチカ
+    reverse = "reverse"              # 逆質問（応募者→面接官）
+    other = "other"
+
+
+class QaSegment(BaseModel):
+    """設問-回答の1単位。pitch等(audio)はLLMではなく決定論で後付けする。"""
+
+    index: int
+    question: str                    # 質問（無ければ話題からの要約。逆質問も許容）
+    answer: str                      # 応募者の回答テキスト
+    start: float
+    end: float
+    score: int = Field(ge=0, le=100)  # 設問別スコア（ルーブリックでアンカー）
+    comment: str
+    intent: QuestionIntent = QuestionIntent.other  # 名寄せ用カテゴリ
+    is_reverse_question: bool = False              # 逆質問フェーズの役割反転
+    question_inferred: bool = False                # 質問が音声に無くLLM推定の場合 true
+    audio: QaAudio | None = None
+
+
+class Minutes(BaseModel):
+    """議事録（④）。"""
+
+    summary: str
+    topics: list[str]
+    key_points: list[str]
+
+
 class AnalysisResult(BaseModel):
     overall_score: int = Field(ge=0, le=100)
     dimensions: Dimensions
@@ -99,6 +145,9 @@ class AnalysisResult(BaseModel):
     transcript: Transcript
     strengths: list[str]
     improvements: list[str]
+    # --- 話者分離→LLM整形エピック（004/005）で追加。後方互換のため optional/default ---
+    minutes: Minutes | None = None
+    qa_segments: list[QaSegment] = Field(default_factory=list)
 
 
 class InterviewJob(BaseModel):
