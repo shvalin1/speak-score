@@ -11,14 +11,18 @@ resource "google_service_account" "deployer" {
 }
 
 # deployer のプロジェクト権限（最小限）。
-#  run.developer            … Cloud Run の新リビジョンをデプロイ（image 差し替え）
-#  cloudbuild.builds.editor … Cloud Build へビルドを submit
-#  logging.viewer           … gcloud builds submit のログストリーミング（read-only）
+#  run.developer               … Cloud Run の新リビジョンをデプロイ（image 差し替え）
+#  cloudbuild.builds.editor    … Cloud Build へビルドを submit
+#  serviceusage.serviceUsageConsumer … gcloud builds submit がプロジェクトを quota project として
+#                                使うのに必要な serviceusage.services.use を含む（これが無いと
+#                                「forbidden from accessing the bucket」という紛らわしいエラーで失敗）
+#  logging.viewer              … gcloud builds submit のログストリーミング（read-only）
 # ※ actAs と Storage は「対象リソースだけ」に絞って下で個別付与する（プロジェクト全体には撒かない）。
 locals {
   deployer_roles = [
     "roles/run.developer",
     "roles/cloudbuild.builds.editor",
+    "roles/serviceusage.serviceUsageConsumer",
     "roles/logging.viewer",
   ]
 }
@@ -46,11 +50,13 @@ resource "google_service_account_iam_member" "deployer_actas_compute" {
   member             = "serviceAccount:${google_service_account.deployer.email}"
 }
 
-# Cloud Build のソースステージング（gs://<project>_cloudbuild）への書き込みだけを許可。
+# Cloud Build のソースステージング（gs://<project>_cloudbuild）への権限。
+# bucket スコープの storage.admin = このバケットだけの buckets.get + object 操作。
+# （objectAdmin だと buckets.get が無く、gcloud builds submit の存在チェックで弾かれる）
 # プロジェクト全体の storage 権限は付けない（uploads バケット＝ユーザー動画に触れさせない）。
 resource "google_storage_bucket_iam_member" "deployer_cloudbuild_staging" {
   bucket = "${var.project_id}_cloudbuild"
-  role   = "roles/storage.objectAdmin"
+  role   = "roles/storage.admin"
   member = "serviceAccount:${google_service_account.deployer.email}"
 }
 
