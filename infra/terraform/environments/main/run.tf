@@ -99,6 +99,13 @@ resource "google_cloud_run_v2_service" "backend" {
     }
   }
 
+  # CD（deploy.yml）が gcloud run deploy で image を差し替える。terraform はインフラの
+  # 土台のみを所有し、image の drift は無視する（次の apply で巻き戻さない）。
+  # 初回作成時は var.backend_image を使う（ignore_changes は作成後の drift だけ無視）。
+  lifecycle {
+    ignore_changes = [template[0].containers[0].image]
+  }
+
   depends_on = [google_project_service.services]
 }
 
@@ -126,6 +133,11 @@ resource "google_cloud_run_v2_service" "frontend" {
         value = google_cloud_run_v2_service.backend.uri
       }
     }
+  }
+
+  # backend と同じく image は CD が所有。terraform は drift を無視する。
+  lifecycle {
+    ignore_changes = [template[0].containers[0].image]
   }
 
   depends_on = [google_project_service.services]

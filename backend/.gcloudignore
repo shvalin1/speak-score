@@ -1,0 +1,12 @@
+# backend を Cloud Build へ submit するときの除外（source=backend/）。
+# Dockerfile が使うのは pyproject.toml / uv.lock / src のみ。重い venv や秘密・キャッシュ・
+# tests は不要かつ載せてはいけない。
+.venv/
+.env
+.env.*
+!.env.example
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+**/__pycache__/
+tests/
