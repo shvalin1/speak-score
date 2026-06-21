@@ -6,3 +6,7 @@ __pycache__/
 *.mp4
 *.mov
 *.mp3
+# 入力音声(PII)・話者分離モデル(大容量・再DL可)は追跡しない
+InputData/
+diar_models/
+.ipynb_checkpoints/
