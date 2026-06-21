@@ -43,6 +43,34 @@ def test_start_unknown_job_404(client):
     assert res.status_code == 404
 
 
+def test_list_qa_owner_scoped_and_sorted(client):
+    import json
+    import uuid
+    from pathlib import Path
+
+    from src.repositories import job_repo
+    from src.schemas.interview import AnalysisResult, QaSegment
+
+    repo = job_repo.get_job_repo()
+    jid = uuid.uuid4().hex
+    repo.create(jid, owner_uid="dev-user", expire_at=None, content_type="video/mp4")
+    repo.mark_processing(jid)
+    repo.try_acquire_lease(jid, "w")
+
+    sample = Path(__file__).resolve().parents[2] / "shared" / "mock_data" / "sample_result.json"
+    base = AnalysisResult.model_validate(json.loads(sample.read_text(encoding="utf-8")))
+    result = base.model_copy(update={"qa_segments": [
+        QaSegment(index=0, question="q1", answer="a", start=0.0, end=1.0, score=55, comment="c"),
+        QaSegment(index=1, question="q2", answer="a", start=1.0, end=2.0, score=90, comment="c"),
+    ]})
+    repo.complete(jid, result, "w")
+
+    res = client.get("/api/qa")
+    assert res.status_code == 200
+    scores = [e["score"] for e in res.json()]
+    assert scores == [90, 55]  # score 降順
+
+
 def _seed_job_with_bucket(monkeypatch, content_type="video/mp4"):
     """GCS_BUCKET を設定し、in-memory repo に awaiting_upload のジョブを1件作る。"""
     import uuid

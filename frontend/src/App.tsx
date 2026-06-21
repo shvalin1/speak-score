@@ -9,6 +9,7 @@ import { FloatingProgressWidget } from "./components/FloatingProgressWidget";
 import { HomePage } from "./pages/HomePage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { JobPage } from "./pages/JobPage";
+import { QaListPage } from "./pages/QaListPage";
 import "./App.css";
 
 export default function App() {
@@ -20,6 +21,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/history" element={<HistoryPage />} />
+          <Route path="/qa" element={<QaListPage />} />
           <Route path="/jobs/:jobId" element={<JobPage />} />
         </Routes>
       </main>

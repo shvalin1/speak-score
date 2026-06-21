@@ -13,6 +13,8 @@ from abc import ABC, abstractmethod
 from datetime import UTC, datetime, timedelta
 from threading import Lock
 
+from pydantic import BaseModel
+
 from ..core.config import LEASE_DURATION_SECONDS, get_settings
 from ..schemas.interview import (
     AnalysisResult,
@@ -23,6 +25,62 @@ from ..schemas.interview import (
 )
 
 LEASE_DURATION = timedelta(seconds=LEASE_DURATION_SECONDS)  # config と単一の出典
+
+# 動画横断の設問一覧用 denormalized 索引コレクション（§5）。
+QA_INDEX_COLLECTION = "qa_index"
+
+
+class QaIndexEntry(BaseModel):
+    """`qa_index` 1件（凍結契約ではない内部/レスポンス型）。
+
+    本文 answer は持たず軽量。横断一覧は本索引だけを引き、AnalysisResult のフルロードと
+    1MiB トリムの影響を回避する（§5/§13.1）。フロントの TS 型は Phase5 で追加。
+    """
+
+    job_id: str
+    created_at: datetime
+    index: int
+    question: str
+    score: int
+    pitch_mean: float
+    intent: str
+
+
+def _qa_index_payloads(
+    job_id: str, owner_uid: str, created_at: datetime, result: AnalysisResult
+) -> list[dict]:
+    """**トリム前の原本** result.qa_segments から索引ドキュメントを生成する（§13.1）。
+
+    doc id = `{job_id}_{index}` で冪等化（再 complete で上書き）。
+    """
+    payloads: list[dict] = []
+    for seg in result.qa_segments:
+        payloads.append(
+            {
+                "doc_id": f"{job_id}_{seg.index}",
+                "job_id": job_id,
+                "owner_uid": owner_uid,
+                "created_at": created_at,
+                "index": seg.index,
+                "question": seg.question,
+                "score": seg.score,
+                "pitch_mean": seg.audio.pitch_mean if seg.audio else 0.0,
+                "intent": seg.intent.value,
+            }
+        )
+    return payloads
+
+
+def _to_qa_entry(d: dict) -> QaIndexEntry:
+    return QaIndexEntry(
+        job_id=d["job_id"],
+        created_at=d["created_at"],
+        index=d["index"],
+        question=d["question"],
+        score=d["score"],
+        pitch_mean=d.get("pitch_mean", 0.0),
+        intent=d.get("intent", "other"),
+    )
 
 # Firestore の 1MiB ドキュメント上限対策。長尺動画の timeline/transcript で complete が
 # 落ちるのを防ぐため、保存前に間引き/切詰めする（§5.1, §10 / step2_plan HIGH）。
@@ -76,15 +134,22 @@ def _trim_result(result: AnalysisResult) -> AnalysisResult:
     return _byte_guard(trimmed)
 
 
-def _byte_guard(result: AnalysisResult) -> AnalysisResult:
-    """シリアライズ後バイト数が上限内ならそのまま。超過時は重い順に破棄/切詰める。
+def _over(result: AnalysisResult) -> bool:
+    return len(result.model_dump_json().encode()) > MAX_RESULT_BYTES
 
-    要素数/文字数の上限を抜けた個別フィールドの暴走に対する保険。これにより
-    repo.complete の Firestore 書込が 1MiB 超で失敗→ジョブ滞留する経路を塞ぐ。
+
+def _byte_guard(result: AnalysisResult) -> AnalysisResult:
+    """シリアライズ後バイト数が上限内ならそのまま。超過時は重い順に段階的に破棄/切詰める。
+
+    各段で再測定し、上限内に収まった時点で打ち切る hard cap（§13.4）。破棄順は
+    「transcript.segments → 自由記述 → qa_segments.answer（transcript と重複）→ 件数 →
+    minutes → comment/full_text」。索引（qa_index）は complete 時に**トリム前の原本**から
+    生成済みなので、ここで qa_segments を削っても横断一覧は欠落しない（§5/§13.1）。
     """
-    if len(result.model_dump_json().encode()) <= MAX_RESULT_BYTES:
+    if not _over(result):
         return result
-    # 最も重い transcript.segments を破棄し、自由記述リストを件数/文字数で詰める
+
+    # 1. 最も重い transcript.segments を破棄し、自由記述リストを件数/文字数で詰める
     tr = result.transcript.model_copy(update={"segments": []})
     result = result.model_copy(
         update={
@@ -93,17 +158,44 @@ def _byte_guard(result: AnalysisResult) -> AnalysisResult:
             "improvements": [s[:2000] for s in result.improvements[:20]],
         }
     )
-    if len(result.model_dump_json().encode()) > MAX_RESULT_BYTES:
-        # それでも超えるなら full_text を更に詰める（最後の砦）
-        tr = result.transcript.model_copy(update={"full_text": result.transcript.full_text[:5000]})
-        result = result.model_copy(update={"transcript": tr})
+    if not _over(result):
+        return result
+
+    # 2. qa_segments.answer を切詰め（transcript と重複し長尺で効く）
+    qa = [s.model_copy(update={"answer": s.answer[:500]}) for s in result.qa_segments]
+    result = result.model_copy(update={"qa_segments": qa})
+    if not _over(result):
+        return result
+
+    # 3. qa_segments の件数を制限
+    result = result.model_copy(update={"qa_segments": result.qa_segments[:50]})
+    if not _over(result):
+        return result
+
+    # 4. minutes を切詰め
+    if result.minutes is not None:
+        m = result.minutes.model_copy(
+            update={
+                "summary": result.minutes.summary[:2000],
+                "key_points": result.minutes.key_points[:20],
+                "topics": result.minutes.topics[:20],
+            }
+        )
+        result = result.model_copy(update={"minutes": m})
+    if not _over(result):
+        return result
+
+    # 5. 最後の砦: comment と full_text を更に詰める
+    qa = [s.model_copy(update={"comment": s.comment[:200]}) for s in result.qa_segments]
+    tr = result.transcript.model_copy(update={"full_text": result.transcript.full_text[:5000]})
+    result = result.model_copy(update={"qa_segments": qa, "transcript": tr})
     return result
 
 
 class JobRepository(ABC):
     @abstractmethod
     def create(
-        self, job_id: str, owner_uid: str, expire_at: datetime, content_type: str
+        self, job_id: str, owner_uid: str, expire_at: datetime | None, content_type: str
     ) -> None: ...
 
     @abstractmethod
@@ -153,16 +245,21 @@ class JobRepository(ABC):
     @abstractmethod
     def list_for_owner(self, owner_uid: str) -> list[InterviewSummary]: ...
 
+    @abstractmethod
+    def list_qa_for_owner(self, owner_uid: str) -> list[QaIndexEntry]:
+        """owner の全動画横断で設問別索引を返す（score 降順）。横断一覧（GET /qa）用。"""
+
 
 class InMemoryJobRepo(JobRepository):
     """プロセス内辞書ストア。ローカル開発・テスト用（本番では使わない）。"""
 
     def __init__(self) -> None:
         self._db: dict[str, dict] = {}
+        self._qa_index: dict[str, dict] = {}  # doc_id -> qa_index payload
         self._lock = Lock()
 
     def create(
-        self, job_id: str, owner_uid: str, expire_at: datetime, content_type: str
+        self, job_id: str, owner_uid: str, expire_at: datetime | None, content_type: str
     ) -> None:
         with self._lock:
             self._db[job_id] = {
@@ -263,6 +360,13 @@ class InMemoryJobRepo(JobRepository):
                 d["completed_at"] = _now()
                 d["lease_owner"] = None
                 d["lease_expires_at"] = None
+                # qa_index は**トリム前の原本**から生成（Lock 下で原子化・§13.1）。
+                # 再 complete に備え当該ジョブの旧索引を捨ててから書き直す（doc_id で冪等）。
+                self._qa_index = {
+                    k: v for k, v in self._qa_index.items() if v["job_id"] != job_id
+                }
+                for p in _qa_index_payloads(job_id, d["owner_uid"], d["created_at"], result):
+                    self._qa_index[p["doc_id"]] = p
 
     def fail(self, job_id: str, user_msg: str, worker_id: str) -> None:
         with self._lock:
@@ -290,6 +394,13 @@ class InMemoryJobRepo(JobRepository):
                 )
             return sorted(out, key=lambda s: s.created_at, reverse=True)
 
+    def list_qa_for_owner(self, owner_uid: str) -> list[QaIndexEntry]:
+        with self._lock:
+            entries = [
+                _to_qa_entry(v) for v in self._qa_index.values() if v["owner_uid"] == owner_uid
+            ]
+        return sorted(entries, key=lambda e: e.score, reverse=True)
+
 
 COLLECTION = "interviews"
 
@@ -312,6 +423,7 @@ class FirestoreJobRepo(JobRepository):
         settings = get_settings()
         self._fs = firestore.Client(project=settings.gcp_project)
         self._col = self._fs.collection(COLLECTION)
+        self._qa_col = self._fs.collection(QA_INDEX_COLLECTION)
 
     def _ref(self, job_id: str):
         return self._col.document(job_id)
@@ -346,7 +458,7 @@ class FirestoreJobRepo(JobRepository):
         _txn(self._fs.transaction())
 
     def create(
-        self, job_id: str, owner_uid: str, expire_at: datetime, content_type: str
+        self, job_id: str, owner_uid: str, expire_at: datetime | None, content_type: str
     ) -> None:
         self._ref(job_id).set(
             {
@@ -356,6 +468,8 @@ class FirestoreJobRepo(JobRepository):
                 "status": JobStatus.awaiting_upload.value,
                 "stage": None,
                 "created_at": _now(),
+                # expire_at=None なら結果TTLを設定しない（デモは結果を保持・§13(A)）。
+                # 動画(GCS)の1日削除は別ライフサイクルで維持。
                 "expire_at": expire_at,
                 "completed_at": None,
                 "error": None,
@@ -452,18 +566,40 @@ class FirestoreJobRepo(JobRepository):
         self._safe_update(job_id, {"stage": stage.value})
 
     def complete(self, job_id: str, result: AnalysisResult, worker_id: str) -> None:
-        self._cas_update(
-            job_id,
-            worker_id,
-            {
-                "status": JobStatus.completed.value,
-                "stage": None,
-                "result": _trim_result(result).model_dump(mode="json"),
-                "completed_at": _now(),
-                "lease_owner": None,
-                "lease_expires_at": None,
-            },
-        )
+        """lease 保持者のみ completed に（CAS）。同一 txn で qa_index も書く（§13.1）。
+
+        索引は**トリム前の原本** result.qa_segments から生成。result 本体は _trim_result 後を保存。
+        索引 doc id = `{job_id}_{index}` で冪等（再 complete で上書き）。クエリ無し純 set のため
+        500 write/txn 上限内で適法（qa_segments は _byte_guard 段で 50 件に制限済み）。
+        """
+        from google.cloud import firestore
+
+        trimmed = _trim_result(result).model_dump(mode="json")
+
+        @firestore.transactional
+        def _txn(txn) -> None:
+            ref = self._ref(job_id)
+            snap = ref.get(transaction=txn)
+            if not (snap.exists and snap.get("lease_owner") == worker_id):
+                return
+            owner_uid = snap.get("owner_uid")
+            created_at = snap.get("created_at")
+            txn.update(
+                ref,
+                {
+                    "status": JobStatus.completed.value,
+                    "stage": None,
+                    "result": trimmed,
+                    "completed_at": _now(),
+                    "lease_owner": None,
+                    "lease_expires_at": None,
+                },
+            )
+            for p in _qa_index_payloads(job_id, owner_uid, created_at, result):
+                doc_id = p.pop("doc_id")
+                txn.set(self._qa_col.document(doc_id), p)
+
+        _txn(self._fs.transaction())
 
     def fail(self, job_id: str, user_msg: str, worker_id: str) -> None:
         self._cas_update(
@@ -495,6 +631,14 @@ class FirestoreJobRepo(JobRepository):
                 )
             )
         return sorted(out, key=lambda s: s.created_at, reverse=True)
+
+    def list_qa_for_owner(self, owner_uid: str) -> list[QaIndexEntry]:
+        from google.cloud.firestore_v1 import FieldFilter
+
+        # owner_uid 等価のみ。score 降順は Python 側で行い複合インデックス不要（§13.15）。
+        docs = self._qa_col.where(filter=FieldFilter("owner_uid", "==", owner_uid)).stream()
+        entries = [_to_qa_entry(snap.to_dict()) for snap in docs]
+        return sorted(entries, key=lambda e: e.score, reverse=True)
 
 
 _repo: JobRepository | None = None

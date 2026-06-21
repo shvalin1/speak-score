@@ -5,14 +5,15 @@
 //   文をクリックするとその位置へシークする。
 
 import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
-import { GraduationCap, Video } from "lucide-react";
+import { FileText, GraduationCap, MessagesSquare, Video } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { intentLabel, scoreClass } from "@/lib/qa";
 import { Dashboard } from "./Dashboard";
 import { AudioTimeline } from "./AudioTimeline";
-import type { AnalysisResult, TranscriptSegment } from "../types/interview";
+import type { AnalysisResult, QaSegment, TranscriptSegment } from "../types/interview";
 
-type Tab = "score" | "video";
+export type Tab = "score" | "video" | "minutes" | "qa";
 
 interface Props {
   result: AnalysisResult;
@@ -26,9 +27,11 @@ interface Props {
   onReset: () => void;
 }
 
-const SUBTABS: { key: Tab; label: string; icon: typeof GraduationCap }[] = [
+const ALL_SUBTABS: { key: Tab; label: string; icon: typeof GraduationCap }[] = [
   { key: "score", label: "成績", icon: GraduationCap },
   { key: "video", label: "動画", icon: Video },
+  { key: "minutes", label: "議事録", icon: FileText },
+  { key: "qa", label: "問答", icon: MessagesSquare },
 ];
 
 export function ResultPage({
@@ -39,7 +42,14 @@ export function ResultPage({
   onReset,
 }: Props) {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<Tab>(initialTab);
+  // 議事録/問答は話者分離エピック以降のデータのみ。旧データ（None/空）ではタブを出さない。
+  const hasMinutes = result.minutes != null;
+  const hasQa = (result.qa_segments?.length ?? 0) > 0;
+  const subtabs = ALL_SUBTABS.filter(
+    (s) => (s.key !== "minutes" || hasMinutes) && (s.key !== "qa" || hasQa),
+  );
+  const wanted = subtabs.some((s) => s.key === initialTab) ? initialTab : "score";
+  const [tab, setTab] = useState<Tab>(wanted);
 
   return (
     <div className="flex flex-col gap-4">
@@ -64,7 +74,7 @@ export function ResultPage({
         </div>
 
         <div className="flex rounded-[10px] bg-muted p-0.5">
-          {SUBTABS.map((s) => {
+          {subtabs.map((s) => {
             const Icon = s.icon;
             const on = tab === s.key;
             return (
@@ -88,10 +98,153 @@ export function ResultPage({
       </div>
 
       {/* 中身 */}
-      {tab === "score" ? (
+      {tab === "score" && (
         <Dashboard result={result} onReset={onReset} exportLabel={createdLabel} />
-      ) : (
-        <VideoTab result={result} videoUrl={videoUrl} />
+      )}
+      {tab === "video" && <VideoTab result={result} videoUrl={videoUrl} />}
+      {tab === "minutes" && result.minutes && <MinutesTab minutes={result.minutes} />}
+      {tab === "qa" && (
+        <QaTab segments={result.qa_segments ?? []} videoUrl={videoUrl} />
+      )}
+    </div>
+  );
+}
+
+/* ───────────────────────── 議事録タブ ───────────────────────── */
+
+function MinutesTab({ minutes }: { minutes: NonNullable<AnalysisResult["minutes"]> }) {
+  return (
+    <div className="flex flex-col gap-4">
+      <section className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
+        <h3 className="mb-2 text-sm font-semibold">要約</h3>
+        <p className="text-sm leading-relaxed text-muted-foreground">{minutes.summary}</p>
+      </section>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <section className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
+          <h3 className="mb-2 text-sm font-semibold">トピック</h3>
+          <div className="flex flex-wrap gap-1.5">
+            {minutes.topics.map((t, i) => (
+              <span
+                key={i}
+                className="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground"
+              >
+                {t}
+              </span>
+            ))}
+          </div>
+        </section>
+        <section className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
+          <h3 className="mb-2 text-sm font-semibold">要点</h3>
+          <ul className="flex flex-col gap-1.5">
+            {minutes.key_points.map((k, i) => (
+              <li key={i} className="flex gap-2 text-sm text-muted-foreground">
+                <span className="text-primary">・</span>
+                {k}
+              </li>
+            ))}
+          </ul>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+/* ───────────────────────── 問答タブ ───────────────────────── */
+
+function QaTab({ segments, videoUrl }: { segments: QaSegment[]; videoUrl?: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [openIdx, setOpenIdx] = useState<number | null>(segments.length ? 0 : null);
+
+  const seek = (t: number) => {
+    const v = videoRef.current;
+    if (v) {
+      v.currentTime = t;
+      void v.play().catch(() => {});
+    }
+  };
+
+  return (
+    <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[1.1fr_1fr]">
+      {/* 左: 動画 */}
+      <div className="aspect-video overflow-hidden rounded-xl bg-black ring-1 ring-foreground/10">
+        {videoUrl ? (
+          <video ref={videoRef} src={videoUrl} controls className="size-full" />
+        ) : (
+          <div className="flex size-full items-center justify-center bg-[repeating-linear-gradient(135deg,#161616_0,#161616_12px,#0f0f0f_12px,#0f0f0f_24px)]">
+            <span className="font-mono text-xs text-neutral-500">面接動画（未取得）</span>
+          </div>
+        )}
+      </div>
+
+      {/* 右: 設問別 Q&A（クリックで該当箇所へシーク） */}
+      <div className="flex flex-col gap-2">
+        {segments.map((q) => (
+          <QaCard
+            key={q.index}
+            q={q}
+            open={openIdx === q.index}
+            onToggle={() => setOpenIdx(openIdx === q.index ? null : q.index)}
+            onSeek={() => seek(q.start)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function QaCard({
+  q,
+  open,
+  onToggle,
+  onSeek,
+}: {
+  q: QaSegment;
+  open: boolean;
+  onToggle: () => void;
+  onSeek: () => void;
+}) {
+  return (
+    <div className="overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center gap-3 px-4 py-3 text-left outline-none hover:bg-muted/50"
+      >
+        <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+          {q.is_reverse_question ? "逆質問" : intentLabel(q.intent)}
+        </span>
+        <span className="flex-1 truncate text-sm font-medium">
+          {q.question}
+          {q.question_inferred && (
+            <span className="ml-1 text-xs text-muted-foreground">(推定)</span>
+          )}
+        </span>
+        <span className={cn("text-sm font-bold tabular-nums", scoreClass(q.score))}>
+          {q.score}
+        </span>
+      </button>
+
+      {open && (
+        <div className="border-t border-border px-4 py-3">
+          <p className="mb-2 text-sm leading-relaxed text-muted-foreground">{q.answer}</p>
+          {q.audio && (
+            <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <span>ピッチ {Math.round(q.audio.pitch_mean)}±{Math.round(q.audio.pitch_std)}Hz</span>
+              <span>話速 {Math.round(q.audio.speech_rate_cpm)}字/分</span>
+              <span>フィラー {q.audio.filler_count}回</span>
+            </div>
+          )}
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-foreground/70">{q.comment}</p>
+            <button
+              type="button"
+              onClick={onSeek}
+              className="shrink-0 rounded-lg bg-primary/10 px-3 py-1 text-xs font-medium text-primary outline-none hover:bg-primary/20"
+            >
+              この箇所を再生
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

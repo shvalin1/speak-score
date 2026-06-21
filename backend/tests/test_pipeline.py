@@ -20,11 +20,21 @@ from src.schemas.interview import (
     Dimension,
     DimensionSource,
     FillerHit,
+    Minutes,
+    QaSegment,
     Transcript,
     TranscriptSegment,
 )
-from src.services import audio_analysis, llm_evaluation, pipeline, transcription
+from src.services import (
+    audio_analysis,
+    llm_evaluation,
+    pipeline,
+    qa_formatting,
+    transcription,
+)
 from src.services.llm_evaluation import LlmEvaluation
+from src.services.qa_formatting import QaFormatting
+from src.services.transcription import TranscriptionResult
 
 
 def _future() -> datetime:
@@ -62,13 +72,26 @@ def _mock_media(monkeypatch, *, duration: float = 30.0, wav_bytes: bytes = b"RIF
 def _mock_services(monkeypatch) -> None:
     """Whisper/librosa/gpt-4o を差し替え、配線テストをネットワーク・実音声非依存にする。"""
 
-    async def fake_transcribe(_path: str) -> Transcript:
+    async def fake_transcribe_verbose(_path: str) -> TranscriptionResult:
         text = "本日はよろしくお願いします。えー、自己紹介します。"
-        return Transcript(
+        transcript = Transcript(
             full_text=text,
             duration_sec=8.0,
             segments=[TranscriptSegment(start=0.0, end=8.0, text=text)],
             fillers=[FillerHit(text="えー", start_char=14, end_char=16)],
+        )
+        return TranscriptionResult(transcript=transcript, words=[])
+
+    async def fake_diarize(*_a, **_k) -> list:
+        return []  # 話者分離はスキップ（縮退経路・ネットワーク非依存）
+
+    async def fake_format_qa(_segs, _m, _app) -> QaFormatting:
+        return QaFormatting(
+            minutes=Minutes(summary="面接の要約", topics=["自己紹介"], key_points=["要点"]),
+            qa_segments=[QaSegment(
+                index=0, question="自己紹介をお願いします。", answer="自己紹介します。",
+                start=0.0, end=8.0, score=70, comment="ok",
+            )],
         )
 
     def fake_analyze(_path: str, transcript: Transcript) -> AudioMetrics:
@@ -78,16 +101,18 @@ def _mock_services(monkeypatch) -> None:
             volume_mean=0.05, volume_cv=0.4, volume_timeline=[], pitch_timeline=[],
         )
 
-    async def fake_evaluate(_t: Transcript, _m: AudioMetrics) -> LlmEvaluation:
+    async def fake_evaluate(_t: Transcript, _m: AudioMetrics, **_k) -> LlmEvaluation:
         return LlmEvaluation(
             content=Dimension(score=75, comment="c", source=DimensionSource.llm),
             structure=Dimension(score=70, comment="s", source=DimensionSource.llm),
             strengths=["具体例がある"], improvements=["結論から話す"],
         )
 
-    monkeypatch.setattr(transcription, "transcribe", fake_transcribe)
+    monkeypatch.setattr(transcription, "transcribe_verbose", fake_transcribe_verbose)
+    monkeypatch.setattr(pipeline, "_diarize_or_degrade", fake_diarize)
     monkeypatch.setattr(audio_analysis, "analyze_audio", fake_analyze)
     monkeypatch.setattr(llm_evaluation, "evaluate", fake_evaluate)
+    monkeypatch.setattr(qa_formatting, "format_qa", fake_format_qa)
 
 
 def test_run_pipeline_extracts_and_completes(monkeypatch) -> None:
@@ -100,6 +125,9 @@ def test_run_pipeline_extracts_and_completes(monkeypatch) -> None:
 
     assert result.overall_score >= 0
     assert result.transcript.full_text  # ダミーでも文字起こしが返る
+    # 議事録・問答が AnalysisResult に伝播する
+    assert result.minutes is not None and result.minutes.summary == "面接の要約"
+    assert len(result.qa_segments) == 1 and result.qa_segments[0].index == 0
     # 一時ディレクトリは finally で掃除される
     assert not os.path.exists(os.path.dirname(captured["wav"]))
 

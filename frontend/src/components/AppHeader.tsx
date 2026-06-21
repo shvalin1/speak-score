@@ -7,11 +7,12 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuth } from "../services/auth";
 
-type HeaderTab = "home" | "history";
+type HeaderTab = "home" | "history" | "qa";
 
 const TABS: { key: HeaderTab; path: string; label: string }[] = [
   { key: "home", path: "/", label: "ホーム" },
   { key: "history", path: "/history", label: "履歴" },
+  { key: "qa", path: "/qa", label: "設問別" },
 ];
 
 export function AppHeader() {
@@ -21,9 +22,11 @@ export function AppHeader() {
   // /jobs/:jobId（分析中・結果・エラー画面）は履歴から辿る導線なので「履歴」扱いにする。
   const active: HeaderTab | null = pathname === "/"
     ? "home"
-    : pathname.startsWith("/history") || pathname.startsWith("/jobs/")
-      ? "history"
-      : null;
+    : pathname.startsWith("/qa")
+      ? "qa"
+      : pathname.startsWith("/history") || pathname.startsWith("/jobs/")
+        ? "history"
+        : null;
 
   return (
     <header className="sticky top-0 z-30 flex h-[60px] items-center justify-between border-b border-border bg-background px-6">
