@@ -266,6 +266,23 @@ def test_attribute_speakers_by_words_splits_at_boundary() -> None:
     assert out[0].start == 0.0 and out[1].end == 4.0
 
 
+def test_attribute_speakers_zero_duration_word_uses_nearest() -> None:
+    # ゼロ長 word / turn 間ギャップの word は None で分断せず、最近傍話者に吸収される
+    words = [
+        Word(start=0.0, end=1.0, text="本題に"),
+        Word(start=1.0, end=1.0, text="入"),       # ゼロ長 → 最近傍(speaker0)へ
+        Word(start=1.0, end=2.0, text="る前に"),
+    ]
+    turns = [SpeakerTurn(0.0, 2.0, "0"), SpeakerTurn(2.0, 4.0, "1")]
+
+    out = diarization.attribute_speakers([], words, turns)
+
+    # 全 word が speaker0 に帰属し、1セグメントに結合される（None で分断しない）
+    assert len(out) == 1
+    assert out[0].speaker == "0"
+    assert out[0].text == "本題に入る前に"
+
+
 def test_attribute_speakers_segment_fallback_when_no_words() -> None:
     # word が無ければ segment 丸帰属（最大重なり）にフォールバックする
     turns = [SpeakerTurn(0.0, 1.0, "0"), SpeakerTurn(1.0, 5.0, "1")]

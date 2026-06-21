@@ -151,14 +151,38 @@ def _max_overlap_speaker(start: float, end: float, turns: list[SpeakerTurn]) -> 
     return max(tally, key=tally.get) if tally else None
 
 
+def _nearest_speaker(start: float, end: float, turns: list[SpeakerTurn]) -> str | None:
+    """中点に最も近い turn の話者（重なりが無いときのフォールバック）。"""
+    if not turns:
+        return None
+    mid = (start + end) / 2.0
+
+    def dist(t: SpeakerTurn) -> float:
+        if t.start <= mid <= t.end:
+            return 0.0
+        return min(abs(mid - t.start), abs(mid - t.end))
+
+    return min(turns, key=dist).speaker
+
+
+def _word_speaker(start: float, end: float, turns: list[SpeakerTurn]) -> str | None:
+    """word の話者を決める。最大重なり優先、無ければ中点最近傍へフォールバック。
+
+    Whisper の word はゼロ長(start==end)や turn 間ギャップに落ちることがあり、重なりだけだと
+    None になってランを分断する（実データで頻発）。最近傍で必ず話者を与え分断を防ぐ。
+    """
+    spk = _max_overlap_speaker(start, end, turns)
+    return spk if spk is not None else _nearest_speaker(start, end, turns)
+
+
 def _attribute_by_words(words: list[Word], turns: list[SpeakerTurn]) -> list[TranscriptSegment]:
-    """各 word を最大重なりで話者帰属し、連続同一話者を結合して segment 化する。
+    """各 word を話者帰属し、連続同一話者を結合して segment 化する。
 
     segment 丸帰属では末尾境界で面接官発話が応募者に混入するため、word 境界で分割する（§12.3）。
     """
     out: list[TranscriptSegment] = []
     for w in words:
-        spk = _max_overlap_speaker(w.start, w.end, turns)
+        spk = _word_speaker(w.start, w.end, turns)
         if out and out[-1].speaker == spk:
             last = out[-1]
             out[-1] = TranscriptSegment(
