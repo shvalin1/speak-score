@@ -1,0 +1,17 @@
+# docker build のコンテキスト（frontend は context=リポジトリルート）から除外。
+# ビルド高速化＋不要・秘密ファイルの混入防止（Dockerfile は frontend/ と shared/ のみ COPY するが
+# 防御的に絞る）。バックエンドの重い venv やキャッシュも frontend ビルドの context に入れない。
+.git/
+**/node_modules/
+**/dist/
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.env
+**/.env.*
+!**/.env.example
+*.tfstate
+*.tfstate.backup
+.terraform/
+_ai/
