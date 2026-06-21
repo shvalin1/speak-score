@@ -1,0 +1,14 @@
+# Cloud Build へアップロードするソースから除外（イメージビルドに不要なもの）。
+# Dockerfile は npm ci で依存を入れ直すため node_modules/dist は不要。
+.git/
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+_ai/
+.env
+.env.*
+!.env.example
+*.tfstate
+*.tfstate.backup
+.terraform/
