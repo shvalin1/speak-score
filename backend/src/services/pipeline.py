@@ -11,9 +11,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import logging
 import os
 import shutil
 import tempfile
+
+import httpx
 
 from ..core import media, storage
 from ..core.config import Settings, get_settings
@@ -26,7 +30,20 @@ from ..schemas.interview import (
     DimensionSource,
     ProcessingStage,
 )
-from . import audio_analysis, llm_evaluation, scoring, transcription
+from . import (
+    applicant_id,
+    audio_analysis,
+    diarization,
+    llm_evaluation,
+    qa_formatting,
+    scoring,
+    transcription,
+)
+
+log = logging.getLogger(__name__)
+
+# Gladia ポーリング中の lease 維持。LEASE_DURATION(900s)/2=450s より十分小さく取る（§13.2）。
+_HEARTBEAT_INTERVAL_SEC = 120
 
 
 def _prepare_audio(job_id: str, content_type: str, settings: Settings, tmp_dir: str) -> str:
@@ -57,6 +74,71 @@ def _prepare_audio(job_id: str, content_type: str, settings: Settings, tmp_dir: 
     return wav_path
 
 
+async def _diarize_with_heartbeat(
+    wav_path: str, key: str, job_id: str, repo: JobRepository, worker_id: str
+) -> list[diarization.SpeakerTurn]:
+    """Gladia の同期ポーリングを別スレッドで回しつつ、定期 heartbeat で lease を延長する。
+
+    heartbeat 要件（§13.2）: finally で確実に cancel・interval < LEASE/2・
+    heartbeat 例外は握り潰し本処理継続・ブロッキング renew_lease は to_thread。
+    """
+    stop = asyncio.Event()
+
+    async def heartbeat() -> None:
+        while not stop.is_set():
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=_HEARTBEAT_INTERVAL_SEC)
+            except TimeoutError:
+                try:
+                    await asyncio.to_thread(repo.renew_lease, job_id, worker_id)
+                except Exception as e:  # noqa: BLE001 heartbeat 例外は握り潰す
+                    log.warning("heartbeat renew_lease 失敗（無視して継続）: %s", e)
+
+    hb = asyncio.create_task(heartbeat())
+    try:
+        return await asyncio.to_thread(diarization.diarize_gladia, wav_path, key)
+    finally:
+        stop.set()
+        hb.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await hb
+
+
+async def _diarize_or_degrade(
+    wav_path: str, settings: Settings, job_id: str, repo: JobRepository, worker_id: str
+) -> list[diarization.SpeakerTurn]:
+    """話者分離を試み、キー未設定/障害/話者1名なら空 turns（単一話者縮退）を返す。"""
+    if not settings.gladia_api_key:
+        log.info("GLADIA_API_KEY 未設定 → 話者分離をスキップ（単一話者縮退）")
+        return []
+
+    repo.update_stage(job_id, ProcessingStage.diarizing)
+    repo.renew_lease(job_id, worker_id)
+    try:
+        turns = await _diarize_with_heartbeat(
+            wav_path, settings.gladia_api_key, job_id, repo, worker_id
+        )
+    except (diarization.GladiaError, httpx.HTTPError) as e:
+        log.warning("Gladia 話者分離に失敗 → 単一話者に縮退: %s", e)
+        return []
+
+    if diarization.n_speakers(turns) < 2:
+        log.info("Gladia 検出話者数 < 2 → 単一話者に縮退")
+        return []
+    return turns
+
+
+async def _format_qa_or_degrade(
+    segments, metrics, applicant_speaker: str | None
+) -> qa_formatting.QaFormatting | None:
+    """LLM#2 整形。失敗してもジョブを落とさず縮退（Gladia/Whisper の二重課金を避ける）。"""
+    try:
+        return await qa_formatting.format_qa(segments, metrics, applicant_speaker)
+    except Exception as e:  # noqa: BLE001 整形失敗は縮退（minutes/qa_segments を空に）
+        log.warning("qa_formatting 失敗 → minutes/qa_segments を空で縮退: %s", e)
+        return None
+
+
 async def run_pipeline(job_id: str, repo: JobRepository, worker_id: str) -> AnalysisResult:
     settings = get_settings()
     # stage=extracting_audio はリース取得時にセット済み。
@@ -73,19 +155,33 @@ async def run_pipeline(job_id: str, repo: JobRepository, worker_id: str) -> Anal
         # DL→ffmpeg は同期 CPU/IO bound のため別スレッドへ（async ループを塞がない）
         wav_path = await asyncio.to_thread(_prepare_audio, job_id, content_type, settings, tmp_dir)
 
+        # 話者分離（Gladia・B方式）。キー未設定/障害/1話者なら空 turns で縮退。
+        turns = await _diarize_or_degrade(wav_path, settings, job_id, repo, worker_id)
+
         repo.update_stage(job_id, ProcessingStage.transcribing)
         repo.renew_lease(job_id, worker_id)
-        transcript = await transcription.transcribe(wav_path)
+        tr = await transcription.transcribe_verbose(wav_path)
+        transcript = tr.transcript
+        # 話者を充填（full_text/fillers は不変・segments のみ差し替え）。turns 空なら素通り。
+        if turns:
+            attributed = diarization.attribute_speakers(transcript.segments, tr.words, turns)
+            transcript = transcript.model_copy(update={"segments": attributed})
 
         repo.update_stage(job_id, ProcessingStage.analyzing_audio)
         repo.renew_lease(job_id, worker_id)
         # librosa 等は CPU bound のため別スレッドへ
         metrics = await asyncio.to_thread(audio_analysis.analyze_audio, wav_path, transcript)
 
+        # LLM#0: 応募者の話者を判定（失敗/不確実は縮退・例外を上げない）。
+        applicant = await asyncio.to_thread(applicant_id.identify_applicant, transcript.segments)
+
         repo.update_stage(job_id, ProcessingStage.evaluating)
         repo.renew_lease(job_id, worker_id)
-        # 音声でなく文字起こしテキストを LLM に渡す（話し方評価は delivery 側で分離）
-        llm = await llm_evaluation.evaluate(transcript, metrics)
+        # LLM#1(評価) と LLM#2(議事録/問答整形) を並行実行。整形失敗はジョブを落とさず縮退。
+        llm, qa = await asyncio.gather(
+            llm_evaluation.evaluate(transcript, metrics),
+            _format_qa_or_degrade(transcript.segments, metrics, applicant.speaker),
+        )
 
         # 算出系（delivery/confidence）は決定論スコアリング、LLM系はllmの採点を使う
         dimensions = Dimensions(
@@ -109,6 +205,8 @@ async def run_pipeline(job_id: str, repo: JobRepository, worker_id: str) -> Anal
             transcript=transcript,
             strengths=llm.strengths,
             improvements=llm.improvements,
+            minutes=qa.minutes if qa else None,
+            qa_segments=qa.qa_segments if qa else [],
         )
     finally:
         # Cloud Run インスタンス再利用でディスクが溜まらないよう一時ディレクトリごと削除

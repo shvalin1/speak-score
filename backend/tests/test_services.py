@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 
+import httpx
 import numpy as np
 import pytest
 import soundfile as sf
@@ -20,7 +21,16 @@ from src.schemas.interview import (
     Transcript,
     TranscriptSegment,
 )
-from src.services import audio_analysis, llm_evaluation, qa_formatting, transcription
+from src.services import (
+    applicant_id,
+    audio_analysis,
+    diarization,
+    llm_evaluation,
+    qa_formatting,
+    transcription,
+)
+from src.services.diarization import SpeakerTurn
+from src.services.transcription import Word
 
 
 def test_find_fillers_longest_match_no_overlap() -> None:
@@ -234,3 +244,120 @@ def test_qa_formatting_retries_then_recoverable(monkeypatch) -> None:
     with pytest.raises(RecoverableError):
         asyncio.run(qa_formatting.format_qa(segs, _metrics_with_pitch([]), "1"))
     assert calls["n"] == 2  # 初回 + 1リトライ
+
+
+# --- diarization（話者帰属）---------------------------------------------------
+
+def test_attribute_speakers_by_words_splits_at_boundary() -> None:
+    # 1つの Whisper segment が話者境界をまたぐケース。word 粒度で分割・帰属される。
+    words = [
+        Word(start=0.0, end=1.0, text="質問"),
+        Word(start=1.0, end=2.0, text="です"),
+        Word(start=2.0, end=3.0, text="回答"),
+        Word(start=3.0, end=4.0, text="します"),
+    ]
+    turns = [SpeakerTurn(0.0, 2.0, "0"), SpeakerTurn(2.0, 4.0, "1")]
+    segs = [TranscriptSegment(start=0.0, end=4.0, text="質問です回答します")]
+
+    out = diarization.attribute_speakers(segs, words, turns)
+
+    assert [s.speaker for s in out] == ["0", "1"]
+    assert out[0].text == "質問です" and out[1].text == "回答します"
+    assert out[0].start == 0.0 and out[1].end == 4.0
+
+
+def test_attribute_speakers_segment_fallback_when_no_words() -> None:
+    # word が無ければ segment 丸帰属（最大重なり）にフォールバックする
+    turns = [SpeakerTurn(0.0, 1.0, "0"), SpeakerTurn(1.0, 5.0, "1")]
+    segs = [TranscriptSegment(start=0.0, end=5.0, text="まるごと")]
+
+    out = diarization.attribute_speakers(segs, [], turns)
+
+    assert len(out) == 1
+    assert out[0].speaker == "1"  # 重なりの大きい "1"
+
+
+def test_attribute_speakers_no_turns_passthrough() -> None:
+    # turns 空（diarization スキップ）なら speaker=None のまま素通り
+    segs = [TranscriptSegment(start=0.0, end=2.0, text="x", speaker=None)]
+    out = diarization.attribute_speakers(segs, [], [])
+    assert out is segs and out[0].speaker is None
+
+
+def test_diarize_gladia_mock_transport_with_429_retry(tmp_path, monkeypatch) -> None:
+    # backoff/poll の sleep を潰してテストを速くする
+    monkeypatch.setattr(diarization.time, "sleep", lambda _s: None)
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(b"RIFFfake")
+    state = {"poll": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url.endswith("/upload"):
+            return httpx.Response(200, json={"audio_url": "https://x/a.wav"})
+        if url.endswith("/pre-recorded"):
+            return httpx.Response(200, json={"id": "j1", "result_url": "https://api.gladia.io/v2/pre-recorded/j1"})  # noqa: E501
+        state["poll"] += 1
+        if state["poll"] == 1:
+            return httpx.Response(429)  # 一時的 → backoff リトライ
+        if state["poll"] == 2:
+            return httpx.Response(200, json={"status": "processing"})
+        done = {"status": "done", "result": {"transcription": {"utterances": [
+            {"start": 0.0, "end": 2.0, "speaker": 0, "text": "q"},
+            {"start": 2.0, "end": 5.0, "speaker": 1, "text": "a"},
+        ]}}}
+        return httpx.Response(200, json=done)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    turns = diarization.diarize_gladia(str(wav), "key", client=client)
+
+    assert diarization.n_speakers(turns) == 2
+    assert [(t.start, t.end, t.speaker) for t in turns] == [(0.0, 2.0, "0"), (2.0, 5.0, "1")]
+
+
+# --- applicant_id（LLM#0・応募者判定）-----------------------------------------
+
+def _two_speaker_segs() -> list[TranscriptSegment]:
+    return [
+        TranscriptSegment(start=0.0, end=3.0, text="自己紹介をお願いします？", speaker="0"),
+        TranscriptSegment(start=3.0, end=10.0, text="はい、私は山田と申します。", speaker="1"),
+    ]
+
+
+def test_identify_applicant_single_speaker_degrades(monkeypatch) -> None:
+    # 話者1名 → LLM を呼ばず縮退
+    called = {"n": 0}
+    monkeypatch.setattr(applicant_id, "_call_llm", lambda *_a: called.__setitem__("n", 1))
+    segs = [TranscriptSegment(start=0.0, end=5.0, text="x", speaker="0")]
+
+    r = applicant_id.identify_applicant(segs)
+
+    assert r.speaker is None and r.degraded is True
+    assert called["n"] == 0  # LLM 未呼び出し
+
+
+def test_identify_applicant_llm_success(monkeypatch) -> None:
+    monkeypatch.setattr(
+        applicant_id, "_call_llm",
+        lambda *_a: json.dumps({"applicant_speaker": "1", "confidence": 0.9, "reason": "自己紹介"}),
+    )
+    r = applicant_id.identify_applicant(_two_speaker_segs())
+    assert r.speaker == "1" and r.degraded is False
+
+
+def test_identify_applicant_low_confidence_degrades(monkeypatch) -> None:
+    monkeypatch.setattr(
+        applicant_id, "_call_llm",
+        lambda *_a: json.dumps({"applicant_speaker": "1", "confidence": 0.3, "reason": "曖昧"}),
+    )
+    r = applicant_id.identify_applicant(_two_speaker_segs())
+    assert r.speaker == "1" and r.degraded is True  # 推定は返すが degraded
+
+
+def test_identify_applicant_llm_failure_degrades(monkeypatch) -> None:
+    def boom(*_a):
+        raise ValueError("LLM down")
+
+    monkeypatch.setattr(applicant_id, "_call_llm", boom)
+    r = applicant_id.identify_applicant(_two_speaker_segs())
+    assert r.speaker is None and r.degraded is True  # 例外を上げずに縮退

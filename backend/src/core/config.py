@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     whisper_api_key: str = ""            # 通常は openai_api_key と同一
 
+    # --- diarization (Gladia) ---
+    # 話者分離 API キー。未設定時は diarization をスキップ（単一話者扱いで degrade）。
+    # 本番は Secret Manager 経由で注入（experiments では backend/.env）。
+    gladia_api_key: str | None = None
+
     # --- pipeline ---
     max_video_seconds: int = 300         # 動画長5分上限（§5.1）
     max_upload_bytes: int = 200 * 1024 * 1024
