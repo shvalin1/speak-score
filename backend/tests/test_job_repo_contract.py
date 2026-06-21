@@ -258,3 +258,77 @@ def test_list_is_owner_scoped_and_sorted(repo: JobRepository) -> None:
     # created_at 降順
     times = [s.created_at for s in summaries]
     assert times == sorted(times, reverse=True)
+
+
+def test_create_without_ttl(repo: JobRepository) -> None:
+    # 結果TTL撤廃（expire_at=None）でも作成・取得できる（§13(A)）
+    jid = uuid.uuid4().hex
+    repo.create(jid, owner_uid="u1", expire_at=None, content_type="video/mp4")
+    assert repo.get(jid) is not None
+
+
+def _result_with_qa() -> AnalysisResult:
+    from src.schemas.interview import Minutes, QaAudio, QaSegment, QuestionIntent
+
+    return _sample_result().model_copy(
+        update={
+            "minutes": Minutes(summary="要約", topics=["志望動機"], key_points=["具体例"]),
+            "qa_segments": [
+                QaSegment(
+                    index=0, question="志望動機は？", answer="aaa", start=0.0, end=5.0,
+                    score=80, comment="c", intent=QuestionIntent.motivation,
+                    audio=QaAudio(
+                        pitch_mean=150.0, pitch_std=10.0, speech_rate_cpm=300.0, filler_count=1
+                    ),
+                ),
+                QaSegment(
+                    index=1, question="強みは？", answer="bbb", start=5.0, end=10.0,
+                    score=60, comment="c", intent=QuestionIntent.strength,
+                ),
+            ],
+        }
+    )
+
+
+def test_qa_index_built_and_owner_scoped(repo: JobRepository) -> None:
+    owner = "owner-" + uuid.uuid4().hex
+    jid = uuid.uuid4().hex
+    repo.create(jid, owner_uid=owner, expire_at=None, content_type="video/mp4")
+    repo.mark_processing(jid)
+    repo.try_acquire_lease(jid, "w")
+
+    repo.complete(jid, _result_with_qa(), "w")
+
+    entries = repo.list_qa_for_owner(owner)
+    assert [e.score for e in entries] == [80, 60]  # score 降順
+    top = entries[0]
+    assert top.question == "志望動機は？"
+    assert top.intent == "motivation"
+    assert top.pitch_mean == 150.0
+    assert top.job_id == jid
+    # 他人のデータは混ざらない
+    assert repo.list_qa_for_owner("other-" + uuid.uuid4().hex) == []
+
+
+def test_byte_guard_trims_qa_segments_under_cap() -> None:
+    from src.repositories.job_repo import MAX_RESULT_BYTES, _byte_guard
+    from src.schemas.interview import Minutes, QaSegment
+
+    base = _sample_result()
+    # 1MiB を超える巨大な answer を持つ qa_segments を大量に積む
+    big = "あ" * 20000
+    qa = [
+        QaSegment(index=i, question="q", answer=big, start=0.0, end=1.0, score=70, comment="c")
+        for i in range(80)
+    ]
+    result = base.model_copy(
+        update={"minutes": Minutes(summary="s", topics=[], key_points=[]), "qa_segments": qa}
+    )
+    assert len(result.model_dump_json().encode()) > MAX_RESULT_BYTES
+
+    trimmed = _byte_guard(result)
+
+    # qa_segments がトリム対象に含まれ、上限内に収まる（answer 切詰めが効く）
+    assert len(trimmed.model_dump_json().encode()) <= MAX_RESULT_BYTES
+    assert all(len(s.answer) <= 500 for s in trimmed.qa_segments)
+    assert trimmed.minutes is not None  # minutes は段4まで温存される

@@ -6,14 +6,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..core import storage, tasks
 from ..core.auth import get_uid
 from ..core.config import Settings, get_settings
-from ..repositories.job_repo import JobRepository, get_job_repo
+from ..repositories.job_repo import JobRepository, QaIndexEntry, get_job_repo
 from ..schemas.interview import (
     CreateInterviewRequest,
     CreateInterviewResponse,
@@ -25,10 +24,6 @@ from ..schemas.interview import (
 
 router = APIRouter(tags=["interviews"])
 
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
-
 ALLOWED_CONTENT_TYPES = {
     "video/mp4",
     "video/quicktime",
@@ -36,7 +31,6 @@ ALLOWED_CONTENT_TYPES = {
     "audio/m4a",
     "audio/wav",
 }
-JOB_TTL = timedelta(days=1)
 
 
 @router.post("/interviews", status_code=status.HTTP_201_CREATED)
@@ -54,10 +48,12 @@ def create_interview(
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "file too large")
 
     job_id = uuid.uuid4().hex
+    # 結果TTLは設定しない（デモは結果・qa_index を保持し横断一覧/経時比較を成立させる・§13(A)）。
+    # 動画実体(GCS)の1日後削除は別ライフサイクルで維持。
     repo.create(
         job_id,
         owner_uid=uid,
-        expire_at=_utcnow() + JOB_TTL,
+        expire_at=None,
         content_type=req.content_type,
     )
     upload_url, upload_headers = storage.signed_put_url(job_id, req.content_type)
@@ -128,3 +124,12 @@ def list_interviews(
     repo: JobRepository = Depends(get_job_repo),
 ) -> list[InterviewSummary]:
     return repo.list_for_owner(uid)
+
+
+@router.get("/qa")
+def list_qa(
+    uid: str = Depends(get_uid),
+    repo: JobRepository = Depends(get_job_repo),
+) -> list[QaIndexEntry]:
+    """動画横断の設問別一覧（score 降順）。owner_uid でスコープし他人のデータは混ぜない。"""
+    return repo.list_qa_for_owner(uid)
