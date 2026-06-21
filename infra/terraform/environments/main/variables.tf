@@ -55,6 +55,22 @@ variable "github_repository" {
   default     = "shvalin1/speak-score"
 }
 
+variable "sentry_dsn" {
+  type        = string
+  description = <<-EOT
+    backend の Sentry DSN（エラー監視）。空なら Sentry 無効。DSN は ingest 専用の
+    低機微キーだが tracked な .tf に直書きせず terraform.tfvars（gitignore）等で渡す。
+  EOT
+  default     = ""
+  sensitive   = true
+}
+
+variable "sentry_environment" {
+  type        = string
+  description = "Sentry の environment タグ（例: production）。"
+  default     = "production"
+}
+
 variable "auth_disabled" {
   type        = bool
   description = <<-EOT

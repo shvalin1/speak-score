@@ -13,6 +13,9 @@ dependencies = [
     "google-cloud-storage>=2.18",
     "google-cloud-tasks>=2.16",
     "firebase-admin>=6.5",
+    # 観測性。軽量(pure-python)なので base 依存に置き API/health も含めて初期化する。
+    # FastAPI/Starlette 連携は 2.x で自動有効。DSN 未設定なら init をスキップ（no-op）。
+    "sentry-sdk>=2.0",
 ]
 
 [project.optional-dependencies]

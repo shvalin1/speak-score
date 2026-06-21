@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     # 最終試行で一時的失敗のとき worker は再呼出されないため、明示 fail に倒す判定に使う。
     max_task_attempts: int = 3
 
+    # --- observability ---
+    log_level: str = "INFO"              # 構造化ログの出力レベル（core/logging.py）
+    sentry_dsn: str = ""                 # 空なら Sentry 無効（init スキップ）
+    sentry_environment: str = ""         # 例: production / staging（空なら未設定）
+    sentry_traces_sample_rate: float = 0.0  # 既定はエラーのみ（トレースは課金を考慮し off）
+
     # --- emulators (local docker-compose) ---
     firestore_emulator_host: str = ""    # FIRESTORE_EMULATOR_HOST
     firebase_auth_emulator_host: str = ""  # FIREBASE_AUTH_EMULATOR_HOST

@@ -11,9 +11,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import shutil
 import tempfile
+import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Any
 
 from ..core import media, storage
 from ..core.config import Settings, get_settings
@@ -27,6 +32,45 @@ from ..schemas.interview import (
     ProcessingStage,
 )
 from . import audio_analysis, llm_evaluation, scoring, transcription
+
+log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _timed_stage(job_id: str, stage: str) -> AsyncIterator[dict[str, Any]]:
+    """1ステージの所要時間を計測し構造化ログに出す。
+
+    yield する dict に input_bytes 等を積むと stage_complete に含まれる。
+    失敗時は stage_failed を例外型のみ付けて出し（PII を出さない）再送出する。
+    """
+    extra: dict[str, Any] = {}
+    start = time.perf_counter()
+    try:
+        yield extra
+    except Exception as e:  # noqa: BLE001 ステージ失敗を記録して上位へ再送出
+        duration_ms = round((time.perf_counter() - start) * 1000, 1)
+        log.warning(
+            "stage_failed",
+            extra={
+                "job_id": job_id,
+                "stage": stage,
+                "duration_ms": duration_ms,
+                "error_type": type(e).__name__,
+                **extra,
+            },
+        )
+        raise
+    else:
+        duration_ms = round((time.perf_counter() - start) * 1000, 1)
+        log.info(
+            "stage_complete",
+            extra={
+                "job_id": job_id,
+                "stage": stage,
+                "duration_ms": duration_ms,
+                **extra,
+            },
+        )
 
 
 def _prepare_audio(job_id: str, content_type: str, settings: Settings, tmp_dir: str) -> str:
@@ -71,21 +115,28 @@ async def run_pipeline(job_id: str, repo: JobRepository, worker_id: str) -> Anal
     tmp_dir = tempfile.mkdtemp(prefix=f"job_{job_id}_")
     try:
         # DL→ffmpeg は同期 CPU/IO bound のため別スレッドへ（async ループを塞がない）
-        wav_path = await asyncio.to_thread(_prepare_audio, job_id, content_type, settings, tmp_dir)
+        async with _timed_stage(job_id, ProcessingStage.extracting_audio.value) as ex:
+            wav_path = await asyncio.to_thread(
+                _prepare_audio, job_id, content_type, settings, tmp_dir
+            )
+            ex["input_bytes"] = os.path.getsize(wav_path)
 
         repo.update_stage(job_id, ProcessingStage.transcribing)
         repo.renew_lease(job_id, worker_id)
-        transcript = await transcription.transcribe(wav_path)
+        async with _timed_stage(job_id, ProcessingStage.transcribing.value):
+            transcript = await transcription.transcribe(wav_path)
 
         repo.update_stage(job_id, ProcessingStage.analyzing_audio)
         repo.renew_lease(job_id, worker_id)
         # librosa 等は CPU bound のため別スレッドへ
-        metrics = await asyncio.to_thread(audio_analysis.analyze_audio, wav_path, transcript)
+        async with _timed_stage(job_id, ProcessingStage.analyzing_audio.value):
+            metrics = await asyncio.to_thread(audio_analysis.analyze_audio, wav_path, transcript)
 
         repo.update_stage(job_id, ProcessingStage.evaluating)
         repo.renew_lease(job_id, worker_id)
         # 音声でなく文字起こしテキストを LLM に渡す（話し方評価は delivery 側で分離）
-        llm = await llm_evaluation.evaluate(transcript, metrics)
+        async with _timed_stage(job_id, ProcessingStage.evaluating.value):
+            llm = await llm_evaluation.evaluate(transcript, metrics)
 
         # 算出系（delivery/confidence）は決定論スコアリング、LLM系はllmの採点を使う
         dimensions = Dimensions(
