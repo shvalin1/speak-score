@@ -12,3 +12,13 @@ _ai/
 *.tfstate
 *.tfstate.backup
 .terraform/
+# Python の仮想環境・キャッシュ（frontend ビルドの context=リポジトリルートに backend/.venv が
+# 巻き込まれるのを防ぐ。584M 級のアップロードを避ける）。
+.venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+**/.pytest_cache/
+.ruff_cache/
+**/.ruff_cache/

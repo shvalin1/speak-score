@@ -1,0 +1,24 @@
+# backend イメージを Cloud Build でビルド＆Artifact Registry へ push。
+# ビルドコンテキストは backend/（pyproject.toml/uv.lock/src はそこにある。shared は不要）。
+# build-arg なし（Firebase 設定は frontend のみ）。
+#
+# 実行例:
+#   gcloud builds submit backend \
+#     --config infra/docker/cloudbuild.backend.yaml \
+#     --substitutions _IMAGE=us-central1-docker.pkg.dev/speak-score-app/speak-score/backend:TAG
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - Dockerfile
+      - -t
+      - ${_IMAGE}
+      - .
+
+images:
+  - ${_IMAGE}
+
+options:
+  logging: CLOUD_LOGGING_ONLY

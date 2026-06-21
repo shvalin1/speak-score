@@ -49,6 +49,12 @@ variable "worker_url" {
   default     = ""
 }
 
+variable "github_repository" {
+  type        = string
+  description = "CD の WIF が信頼する GitHub リポジトリ（owner/repo）。これ以外はなりすまし不可。"
+  default     = "shvalin1/speak-score"
+}
+
 variable "auth_disabled" {
   type        = bool
   description = <<-EOT
