@@ -29,6 +29,29 @@ def test_find_fillers_longest_match_no_overlap() -> None:
         assert "えーと、あのこれは、なんか難しい。"[h.start_char:h.end_char] == h.text
 
 
+def test_find_fillers_excludes_true_determiner_usage() -> None:
+    # 「あの人」「その中で」は真の連体詞用法（直後に名詞）なのでフィラーとして誤検出しない
+    hits = transcription.find_fillers("あの人に会った。その中でも結構大きい。")
+    texts = [h.text for h in hits]
+    assert "あの" not in texts
+    assert "その" not in texts
+
+
+def test_find_fillers_keeps_filler_usage_of_ano_sono() -> None:
+    # 直後が読点・文末の「あの/その」はフィラーとして検出する
+    hits = transcription.find_fillers("あの、それでですね。その、つまり。")
+    texts = [h.text for h in hits]
+    assert texts.count("あの") == 1
+    assert texts.count("その") == 1
+
+
+def test_find_fillers_detects_etto() -> None:
+    # 旧パターンリストに無かった「えっと」を検出できる
+    hits = transcription.find_fillers("えっと、それは難しいですね。")
+    texts = [h.text for h in hits]
+    assert "えっと" in texts
+
+
 def _write_wav(path: str, seconds: float = 6.0, sr: int = 16000) -> None:
     t = np.linspace(0, seconds, int(sr * seconds), endpoint=False)
     voiced = 0.25 * np.sin(2 * np.pi * 130 * t)
