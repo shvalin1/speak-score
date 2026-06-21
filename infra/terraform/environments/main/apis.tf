@@ -10,6 +10,7 @@ resource "google_project_service" "services" {
     "iam.googleapis.com",
     "iamcredentials.googleapis.com", # 署名URL（signBlob）に必要
     "cloudbuild.googleapis.com",
+    "sts.googleapis.com", # WIF のトークン交換（GitHub OIDC → GCP）
   ])
   service            = each.value
   disable_on_destroy = false

@@ -1,21 +1,110 @@
-# Cloud Run 自動デプロイ（main merge時）。
-# NOTE(Step4): 認証は完走優先で SAキー開始 → 緑になったら WIF 化（design）。
-# GCPプロジェクト確定後に有効化する。現状はプレースホルダ。
+# CD: main へ push/merge で Cloud Run へ自動デプロイ（手動 workflow_dispatch も可）。
+# 方式: Cloud Build でイメージをビルド → gcloud run deploy で差し替え。
+#   - 認証は Workload Identity Federation（長期鍵なし。infra/.../cicd.tf で構築）。
+#   - terraform state/tfvars は CI に持ち込まない。image は CD が所有し、terraform は
+#     ignore_changes で drift を無視する（run.tf）。
+#   - 変更があったサービスだけビルド＆デプロイ（backend は重いので無駄打ちを避ける）。
+#     workflow_dispatch では両方を強制デプロイ。
+#
+# 事前に必要な GitHub Secrets（terraform apply 後の output から設定。docs/cicd-setup.md）:
+#   WIF_PROVIDER             = terraform output workload_identity_provider
+#   WIF_SERVICE_ACCOUNT      = terraform output deployer_sa_email
+#   VITE_FIREBASE_API_KEY    } frontend バンドルへ焼き込む Firebase Web 設定（public 値）。
+#   VITE_FIREBASE_AUTH_DOMAIN}  frontend/.env.local と同じ値。
+#   VITE_FIREBASE_PROJECT_ID }
 name: Deploy
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch: {}
-  # push:
-  #   branches: [main]
+
+permissions:
+  contents: read
+  id-token: write # WIF の OIDC トークン取得に必須
+
+env:
+  PROJECT_ID: speak-score-app
+  REGION: us-central1
+  AR_REPO: speak-score # Artifact Registry リポジトリ名
 
 jobs:
-  deploy:
+  # 変更のあったサービスを判定（backend は shared を import しないので分離）。
+  changes:
     runs-on: ubuntu-latest
-    if: false # TODO(Step4): GCP_PROJECT / 認証(SAキー→WIF) を設定したら有効化
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
     steps:
       - uses: actions/checkout@v4
-      # - uses: google-github-actions/auth@v2
-      #   with: { credentials_json: '${{ secrets.GCP_SA_KEY }}' }
-      # - uses: google-github-actions/setup-gcloud@v2
-      # - run: gcloud builds submit ... && gcloud run deploy ...
-      - run: echo "deploy placeholder"
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'infra/docker/cloudbuild.backend.yaml'
+            frontend:
+              - 'frontend/**'
+              - 'shared/**'
+              - 'infra/docker/cloudbuild.frontend.yaml'
+
+  backend:
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Build & deploy backend
+        run: |
+          set -euo pipefail
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/backend:${GITHUB_SHA::12}"
+          gcloud builds submit backend \
+            --config infra/docker/cloudbuild.backend.yaml \
+            --substitutions "_IMAGE=${IMAGE}" \
+            --project "${PROJECT_ID}"
+          gcloud run deploy speak-score-backend \
+            --image "${IMAGE}" \
+            --region "${REGION}" \
+            --project "${PROJECT_ID}"
+
+  frontend:
+    needs: changes
+    if: ${{ needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Build & deploy frontend
+        run: |
+          set -euo pipefail
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/frontend:${GITHUB_SHA::12}"
+          # 区切りを ^@^ にして値中のカンマで誤パースされないようにする（gcloud の代替デリミタ）。
+          gcloud builds submit \
+            --config infra/docker/cloudbuild.frontend.yaml \
+            --substitutions "^@^_IMAGE=${IMAGE}@_VITE_FIREBASE_API_KEY=${VITE_FIREBASE_API_KEY}@_VITE_FIREBASE_AUTH_DOMAIN=${VITE_FIREBASE_AUTH_DOMAIN}@_VITE_FIREBASE_PROJECT_ID=${VITE_FIREBASE_PROJECT_ID}" \
+            --project "${PROJECT_ID}" \
+            .
+          gcloud run deploy speak-score-frontend \
+            --image "${IMAGE}" \
+            --region "${REGION}" \
+            --project "${PROJECT_ID}"
+        env:
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
