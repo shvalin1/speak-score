@@ -74,6 +74,19 @@ resource "google_cloud_run_v2_service" "backend" {
           }
         }
       }
+      # 話者分離(Gladia)用。値は Secret Manager（secrets.tf）。
+      # 注意: deploy 前に gladia-api-key へ版を1つ追加しておくこと（版0だと Run 起動失敗）。
+      # backend は未設定でも diarization をスキップして起動できるが、ここでは latest 参照のため
+      # 版が無いと Run 起動に失敗する。診断のため版追加を deploy 前提条件にする。
+      env {
+        name = "GLADIA_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = "gladia-api-key"
+            version = "latest"
+          }
+        }
+      }
       # Step1b 実機検証窓のみ true。ユーザーAPIを dev_uid で叩けるようにする。
       # worker の OIDC は worker_oidc_disabled(既定 False)で別管理＝常に必須(fail-closed)。
       dynamic "env" {
