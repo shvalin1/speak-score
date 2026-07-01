@@ -71,6 +71,17 @@ variable "sentry_environment" {
   default     = "production"
 }
 
+variable "allowed_emails" {
+  type        = string
+  description = <<-EOT
+    書込（アップロード/解析）を許可する Google アカウントのメール（カンマ区切り）。
+    ここに載る verified メールの google.com ユーザーだけが writer（個人スコープ＋書込可）。
+    それ以外（匿名・未許可 Google）は全員 read-only。空だと誰も書けない（フェイルクローズ）。
+    メールは低機微のため平文 env(ALLOWED_EMAILS)で渡す。変更は再 apply/再デプロイで反映。
+  EOT
+  default     = ""
+}
+
 variable "auth_disabled" {
   type        = bool
   description = <<-EOT

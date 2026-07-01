@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from ..core import storage, tasks
-from ..core.auth import get_uid
+from ..core.auth import Principal, get_principal, get_uid, require_writer
 from ..core.config import Settings, get_settings
 from ..repositories.job_repo import JobRepository, QaIndexEntry, get_job_repo
 from ..schemas.interview import (
@@ -34,10 +34,32 @@ ALLOWED_CONTENT_TYPES = {
 }
 
 
+class MeResponse(BaseModel):
+    """GET /me のレスポンス。フロントが書込UI（アップロード）の出し分けに使う。
+
+    is_writer が唯一の権限表示。実際の書込制御は require_writer が backend で行う
+    （フロントの出し分けはあくまで UX で、信頼境界ではない）。
+    """
+
+    uid: str
+    email: str | None
+    is_writer: bool
+
+
+@router.get("/me")
+def get_me(principal: Principal = Depends(get_principal)) -> MeResponse:
+    """認証済み主体の権限を返す（reader/writer の判定結果）。未認証は 401。"""
+    return MeResponse(
+        uid=principal.uid,
+        email=principal.email,
+        is_writer=principal.is_writer,
+    )
+
+
 @router.post("/interviews", status_code=status.HTTP_201_CREATED)
 def create_interview(
     req: CreateInterviewRequest,
-    uid: str = Depends(get_uid),
+    uid: str = Depends(require_writer),
     repo: JobRepository = Depends(get_job_repo),
     settings: Settings = Depends(get_settings),
 ) -> CreateInterviewResponse:
@@ -69,7 +91,7 @@ def create_interview(
 @router.post("/interviews/{job_id}/start", status_code=status.HTTP_202_ACCEPTED)
 def start_interview(
     job_id: str,
-    uid: str = Depends(get_uid),
+    uid: str = Depends(require_writer),
     repo: JobRepository = Depends(get_job_repo),
     settings: Settings = Depends(get_settings),
 ) -> StartResponse:

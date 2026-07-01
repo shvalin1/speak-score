@@ -33,6 +33,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
         <h1 className="text-2xl font-bold">SpeakScore</h1>
         <p className="text-pretty text-sm text-muted-foreground">
           面接動画をアップロードして、AIフィードバックを受け取りましょう。
+          アップロードは許可されたアカウントのみ利用できます。
         </p>
         <Button type="button" size="lg" className="mt-2" onClick={signInWithGoogle}>
           Google でログイン
@@ -44,7 +45,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
           className="text-muted-foreground"
           onClick={signIn}
         >
-          ログインせずに試す（匿名）
+          閲覧のみで試す（匿名）
         </Button>
       </div>
     );

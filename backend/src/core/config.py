@@ -33,10 +33,23 @@ class Settings(BaseSettings):
     # auth_disabled とは独立。ローカル同期経路(core/tasks.py 直叩き)では .env で 1 にする。
     worker_oidc_disabled: bool = False
     dev_uid: str = "dev-user"
-    # 匿名ログインは全員この単一 uid に寄せ、評価済みのデモ結果を共有プールで見せる。
-    # Google 等の本物のプロバイダは各自の uid で個人スコープに分離する（auth.get_uid）。
-    # 注意: 匿名ユーザー同士は結果が相互に見えるため、本利用は Google ログインへ誘導する。
+    # 許可リスト外（匿名・未許可 Google）は全員この単一 uid に寄せ read-only とし、
+    # 評価済みのデモ結果を共有プールで閲覧のみ見せる（書込は require_writer で弾く）。
+    # 許可リストの Google だけが各自の uid で個人スコープ＋書込可（auth.get_principal）。
+    # 注意: read-only プールは相互に閲覧できるため、機微データを置かない運用を担保する。
     demo_uid: str = "demo-shared"
+    # 書込（アップロード/解析）を許可する Google アカウントのメール（カンマ区切り・大小無視）。
+    # ここに載る verified メールの google.com ユーザーだけが writer（個人スコープ＋書込可）。
+    # 実体は run.tf の ALLOWED_EMAILS 平文 env（メールは低機微のため Secret 化しない）。
+    # 注意: get_settings は @lru_cache のため、この値の変更反映には再起動（再デプロイ）が要る。
+    allowed_emails: str = ""
+
+    @property
+    def allowed_email_set(self) -> frozenset[str]:
+        """ALLOWED_EMAILS を正規化した集合。空要素は必ず除外（空文字 email の誤許可を防ぐ）。"""
+        return frozenset(
+            e.strip().casefold() for e in self.allowed_emails.split(",") if e.strip()
+        )
 
     # --- LLM ---
     llm_provider: str = "openai"         # anthropic | openai（Step2 は OpenAI 1本: Whisper+gpt-4o）

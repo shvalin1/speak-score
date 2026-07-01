@@ -184,3 +184,65 @@ def test_video_url_403_for_non_owner(client, monkeypatch):
     )
     res = client.get(f"/api/interviews/{jid}/video-url")
     assert res.status_code == 403
+
+
+def test_me_reports_writer_when_auth_disabled(client):
+    # AUTH_DISABLED=1（conftest）は dev-user の writer。
+    res = client.get("/api/me")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["uid"] == "dev-user"
+    assert body["is_writer"] is True
+
+
+def _override_reader():
+    """get_principal を reader（demo_uid・書込不可）に差し替える文脈。"""
+    from src.core.auth import Principal, get_principal
+    from src.main import app
+
+    app.dependency_overrides[get_principal] = lambda: Principal(
+        uid="demo-shared", is_writer=False, email=None, provider="anonymous"
+    )
+    return app
+
+
+def test_reader_cannot_create(client):
+    app = _override_reader()
+    try:
+        res = client.post(
+            "/api/interviews",
+            json={"filename": "a.mp4", "content_type": "video/mp4", "size_bytes": 1024},
+        )
+        assert res.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_reader_cannot_start(client):
+    app = _override_reader()
+    try:
+        res = client.post("/api/interviews/whatever/start")
+        assert res.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_reader_can_read_me(client):
+    app = _override_reader()
+    try:
+        res = client.get("/api/me")
+        assert res.status_code == 200
+        assert res.json()["is_writer"] is False
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_reader_can_read_list_and_qa(client):
+    # reader（demo_uid）は GET 系を読める（read-only）。将来 GET に誤って
+    # require_writer を付けたらここで検知する。demo_uid のプールは空なので [] でよい。
+    app = _override_reader()
+    try:
+        assert client.get("/api/interviews").status_code == 200
+        assert client.get("/api/qa").status_code == 200
+    finally:
+        app.dependency_overrides.clear()

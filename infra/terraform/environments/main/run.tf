@@ -63,6 +63,12 @@ resource "google_cloud_run_v2_service" "backend" {
         name  = "FIREBASE_PROJECT"
         value = var.project_id
       }
+      # 書込を許可する Google アカウント（許可制）。ここに無い verified google.com のみ
+      # writer。メールは低機微のため平文 env（tfstate に入るが Secret 化はしない）。
+      env {
+        name  = "ALLOWED_EMAILS"
+        value = var.allowed_emails
+      }
       # 観測性（Sentry）。DSN は ingest 専用の低機微キーのため plain env で渡す
       # （tfstate には入るが Secret Manager 化はしない）。空なら backend 側で init をスキップ。
       env {
