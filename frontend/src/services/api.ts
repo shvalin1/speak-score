@@ -108,6 +108,23 @@ export async function getVideoUrl(jobId: string): Promise<string | null> {
   return res.video_url;
 }
 
+/** 認証済み主体の権限（GET /me）。書込UI（アップロード）の出し分けに使う。 */
+export interface Me {
+  uid: string;
+  email: string | null;
+  is_writer: boolean;
+}
+
+/**
+ * 現在のユーザーが writer（許可制 Google）か reader（匿名・未許可）かを取得する。
+ * 実際の書込制御は backend の require_writer が行う（ここはあくまで UX の出し分け）。
+ * モックは常に writer（加藤の開発でアップロードUIが出るように）。
+ */
+export async function getMe(): Promise<Me> {
+  if (USE_MOCK) return { uid: "mock-uid", email: null, is_writer: true };
+  return jsonOrThrow<Me>(await authedFetch("/me"));
+}
+
 // XHRで進捗%を取れる署名URL PUT（fetchはアップロード進捗が取れないためXHR）。
 function putToSignedUrl(
   url: string,

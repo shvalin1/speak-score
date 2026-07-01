@@ -11,3 +11,7 @@ cors_origins = ["*"]
 
 # 初回 apply 後に backend_url を入れて再 apply。
 # worker_url = "https://speak-score-backend-xxxxxxxx-uc.a.run.app"
+
+# 書込（アップロード/解析）を許可する Google アカウント（カンマ区切り）。
+# 空だと誰も書けない（read-only 運用）。デモ登壇者のメールを入れる。
+# allowed_emails = "you@gmail.com,teammate@gmail.com"
