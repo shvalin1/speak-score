@@ -41,8 +41,15 @@ export async function getIdToken(): Promise<string | null> {
   return user ? user.getIdToken() : null;
 }
 
+export interface UseAuthUser {
+  uid: string;
+  displayName: string | null;
+  photoURL: string | null;
+  isAnonymous: boolean;
+}
+
 export interface UseAuth {
-  user: { uid: string } | null;
+  user: UseAuthUser | null;
   ready: boolean;
   /** 匿名サインイン（その場で使い始める用）。 */
   signIn: () => Promise<void>;
@@ -56,16 +63,32 @@ export interface UseAuth {
  * AuthGate と AppHeader など複数箇所が同じ状態を見られるよう、Context経由で共有する
  * （フックを呼ぶたびに別状態を持つと、モック時の signOut がここでしか反映されず破綻するため）。
  */
+function toUseAuthUser(u: User): UseAuthUser {
+  return {
+    uid: u.uid,
+    displayName: u.displayName,
+    photoURL: u.photoURL,
+    isAnonymous: u.isAnonymous,
+  };
+}
+
+const MOCK_USER: UseAuthUser = {
+  uid: "mock-uid",
+  displayName: null,
+  photoURL: null,
+  isAnonymous: true,
+};
+
 export function useProvideAuth(): UseAuth {
-  const [user, setUser] = useState<{ uid: string } | null>(
-    USE_MOCK ? { uid: "mock-uid" } : null,
+  const [user, setUser] = useState<UseAuthUser | null>(
+    USE_MOCK ? MOCK_USER : null,
   );
   const [ready, setReady] = useState(USE_MOCK);
 
   useEffect(() => {
     if (USE_MOCK) return;
     const unsub = onAuthStateChanged(ensureAuth(), (u: User | null) => {
-      setUser(u ? { uid: u.uid } : null);
+      setUser(u ? toUseAuthUser(u) : null);
       setReady(true);
     });
     return unsub;
@@ -73,14 +96,14 @@ export function useProvideAuth(): UseAuth {
 
   const signIn = async () => {
     if (USE_MOCK) {
-      setUser({ uid: "mock-uid" });
+      setUser(MOCK_USER);
       return;
     }
     await signInAnonymously(ensureAuth());
   };
   const signInWithGoogle = async () => {
     if (USE_MOCK) {
-      setUser({ uid: "mock-uid" });
+      setUser({ ...MOCK_USER, isAnonymous: false, displayName: "Mock User" });
       return;
     }
     await signInWithPopup(ensureAuth(), new GoogleAuthProvider());

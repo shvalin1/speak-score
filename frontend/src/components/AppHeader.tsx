@@ -1,7 +1,7 @@
 // 全ページ共通ヘッダー（Variation A: アンダーライン / モノクロ）。
 // react-router のuseLocation/useNavigateとuseAuthに自己完結で接続する。
 
-import { LogOut } from "lucide-react";
+import { LogOut, User as UserIcon } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -18,7 +18,8 @@ const TABS: { key: HeaderTab; path: string; label: string }[] = [
 export function AppHeader() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const { signOut } = useAuth();
+  const { user, signOut } = useAuth();
+  const displayName = user?.isAnonymous ? "匿名ユーザー" : user?.displayName ?? "ゲスト";
   // /jobs/:jobId（分析中・結果・エラー画面）は履歴から辿る導線なので「履歴」扱いにする。
   const active: HeaderTab | null = pathname === "/"
     ? "home"
@@ -61,10 +62,28 @@ export function AppHeader() {
         ))}
       </nav>
 
-      <Button variant="outline" onClick={signOut}>
-        <LogOut />
-        ログアウト
-      </Button>
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          {user?.photoURL ? (
+            <img
+              src={user.photoURL}
+              alt=""
+              className="size-7 rounded-full object-cover"
+            />
+          ) : (
+            <span className="flex size-7 items-center justify-center rounded-full bg-muted text-muted-foreground">
+              <UserIcon className="size-4" />
+            </span>
+          )}
+          <span className="text-sm font-medium text-foreground">
+            {displayName}
+          </span>
+        </div>
+        <Button variant="outline" onClick={signOut}>
+          <LogOut />
+          ログアウト
+        </Button>
+      </div>
     </header>
   );
 }
